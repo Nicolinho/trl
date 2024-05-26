@@ -959,6 +959,7 @@ def forward(
         position_ids=position_ids,
         return_dict=True,
         output_hidden_states=True,
+        use_cache=False,
     )
 
 

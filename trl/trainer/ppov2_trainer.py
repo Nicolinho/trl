@@ -24,6 +24,7 @@ from transformers import (
 )
 from transformers.integrations import get_reporting_integration_callbacks
 from transformers.trainer_callback import CallbackHandler, DefaultFlowCallback
+from peft import LoraConfig, get_peft_model
 
 from ..core import masked_mean, masked_whiten
 from ..models.utils import unwrap_model_for_generation
@@ -58,6 +59,7 @@ class PolicyAndValueWrapper(nn.Module):
             **kwargs,
         )
         logits = self.value_model.score(output.hidden_states[-1])
+        kwargs['output_hidden_states'] = False
         return self.policy(**kwargs), logits
 
 
@@ -135,9 +137,34 @@ class PPOv2Trainer(Trainer):
         #########
         for module in [policy, ref_policy, value_model, reward_model]:
             disable_dropout_in_model(module)
-        if args.truncate_token and args.truncate_token == "eos":
+        # if args.truncate_token and args.truncate_token == "eos":
+        if args.stop_token_id and args.stop_token_id == "eos":
             args.stop_token_id = tokenizer.eos_token_id
         self.model = PolicyAndValueWrapper(policy, value_model)
+
+        # cls = torch.nn.Linear
+        # lora_module_names = set()
+        # for name, module in self.model.named_modules():
+        #     if isinstance(module, cls):
+        #         names = name.split('.')
+        #         lora_module_names.add(names[0] if len(names) == 1 else names[-1])
+        #
+        # lora_target_modules = list(lora_module_names)
+        # lora_config = LoraConfig(
+        #     # r=lora_r,
+        #     # lora_alpha=lora_alpha,
+        #     # target_modules=lora_target_modules,
+        #     # lora_dropout=lora_dropout,
+        #     r=32,
+        #     lora_alpha=64,
+        #     target_modules=lora_target_modules,
+        #     lora_dropout=0,
+        #     bias="none",
+        #     task_type="CAUSAL_LM",
+        # )
+        # self.model = get_peft_model(self.model, lora_config)
+        # self.model.print_trainable_parameters()
+
         self.create_optimizer_and_scheduler(num_training_steps=args.num_updates)
 
         #########
@@ -285,7 +312,7 @@ class PPOv2Trainer(Trainer):
                         query_response, logits = generate(
                             unwrapped_model.policy,
                             query,
-                            tokenizer,
+                            tokenizer.pad_token_id,
                             generation_config,
                         )
                         response = query_response[:, context_length:]
@@ -407,7 +434,7 @@ class PPOv2Trainer(Trainer):
                             mb_query_responses = query_responses[micro_batch_inds]
                             mb_logprobs = logprobs[micro_batch_inds]
 
-                            output, vpred_temp = forward(model, mb_query_responses, tokenizer)
+                            output, vpred_temp = forward(model, mb_query_responses, tokenizer.pad_token_id)
                             logits = output.logits[:, context_length - 1 : -1]
                             logits /= args.temperature + 1e-7
                             new_all_logprobs = F.log_softmax(logits, dim=-1)
@@ -458,6 +485,7 @@ class PPOv2Trainer(Trainer):
                                 entropy_stats[ppo_epoch_idx, minibatch_idx, gradient_accumulation_idx] = entropy.mean()
                                 ratio_stats[ppo_epoch_idx, minibatch_idx, gradient_accumulation_idx] = ratio.mean()
                         gradient_accumulation_idx += 1
+                        # torch.cuda.empty_cache()
                     minibatch_idx += 1
                     # del everything and empty cache
                     # fmt: off
@@ -543,7 +571,7 @@ class PPOv2Trainer(Trainer):
                     query_response, _ = generate(
                         unwrapped_model.policy,
                         query,
-                        tokenizer,
+                        tokenizer.pad_token_id,
                         generation_config,
                     )
                 response = query_response[:, context_length:]
