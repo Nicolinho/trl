@@ -154,7 +154,8 @@ if __name__ == "__main__":
 
     ds = ds.map(
         process,
-        num_proc=multiprocessing.cpu_count(),
+        # num_proc=multiprocessing.cpu_count(),
+        num_proc=50,
         load_from_cache_file=False,
     )
     train_dataset = ds[args.dataset_train_split]

@@ -65,6 +65,8 @@ class DPOConfig(TrainingArguments):
             If True, we ignore the _provided_ reference model and implicitly use a reference model that assigns equal probability to all responses.
         force_use_ref_model (`bool`, defaults to `False`):
             In case one passes a PEFT model for the active model and you want to use a different model for the ref_model, set this flag to `True`.
+        reward_model_name_evaluation (`str`, defaults to `None`):
+            Name of 'gold' reward model that is used to evaluate the current policy'.
     """
 
     beta: float = 0.1
@@ -87,3 +89,4 @@ class DPOConfig(TrainingArguments):
     ref_adapter_name: Optional[str] = None
     reference_free: bool = False
     force_use_ref_model: bool = False
+    reward_model_name_evaluation: Optional[str] = None

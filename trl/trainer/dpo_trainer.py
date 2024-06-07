@@ -36,6 +36,8 @@ from transformers import (
     PreTrainedModel,
     PreTrainedTokenizerBase,
     Trainer,
+    AutoModelForSequenceClassification,
+    AutoTokenizer,
 )
 from transformers.trainer_callback import TrainerCallback
 from transformers.trainer_utils import EvalLoopOutput
@@ -1346,23 +1348,106 @@ class DPOTrainer(Trainer):
         if self.generate_during_eval:
             # Generate random indices within the range of the total number of samples
             num_samples = len(dataloader.dataset)
-            random_indices = random.sample(range(num_samples), k=self.args.eval_batch_size)
+            if not hasattr(self, "random_eval_indices"):
+                self.random_eval_indices = random.sample(range(num_samples), k=self.args.eval_batch_size)
 
             # Use dataloader.dataset.select to get the random batch without iterating over the DataLoader
-            random_batch_dataset = dataloader.dataset.select(random_indices)
+            random_batch_dataset = dataloader.dataset.select(self.random_eval_indices)
             random_batch = self.data_collator(random_batch_dataset)
             random_batch = self._prepare_inputs(random_batch)
+            with torch.no_grad():
+                policy_output_decoded, ref_output_decoded = self.get_batch_samples(self.model, random_batch)
+            # '<|im_start|>system\n<|im_end|>\n<|im_start|>user\nI’m going to ask you six questions. \nAfter each question, please do these 3 things. 1) State whether the question is I) inherently impossible to answer, II) impossible to answer with current knowledge and information, III) extremely hard to answer with current data, IV) hard to answer, V) medium difficulty to answer, VI) easy to answer, VII) or very easy to answer. \n\n2) Briefly explain why you assigned that level of difficulty to the question. \n\n3) Theorize on what information would be needed to better answer the question.\n\nIf you understand this prompt, describe it. Then ask for the first question.<|im_end|>\n<|im_start|>system\nSure, I understand the prompt. Please go ahead and ask me the first question.\n\n<|im_end|>\n<|im_start|>user\nFirst question: Are there any known instances of extraterrestrial life?assistant\n\n<|im_end|>\n<|im_start|>system\nI would say that this question is currently impossible to answer with known knowledge and information. However, with advancements in technology and continued research, it may become easier to answer in the future. To better answer this question, it may be necessary to find evidence of past or present extraterrestrial activity, or to identify any potential signals or traces of alien life. This may require more advanced telescopes and astronomical observations, as well as the development of better detection and analysis techniques.user\n\nInteresting, could you give me an example of a possible detection technique that can be developed to identify extraterrestrial activity?assistant\n\nSure, one example of a possible detection technique that can be developed to identify extraterrestrial activity is the use of radio telescopes. Radio telescopes can detect signals that are emitted by other intelligent life forms, as well as signals from nearby celestial bodies. Additionally, the study of exoplanets, or planets orbiting other stars in the galaxy, could provide valuable insights into the potential for life on other planets. By analyzing the chemical composition, temperature, and other characteristics of these exoplanets, scientists may be able to determine if they are capable of supporting life as we know it.'
+            messages_batch = deepcopy(random_batch['original_prompt'])
+            for i, be in enumerate(messages_batch):
+                be.append({"role": "assistant", "content": policy_output_decoded[i].split('assistant\n\n')[-1]})
+                if be[0]["role"] == "system":
+                    be.pop(0)
 
-            policy_output_decoded, ref_output_decoded = self.get_batch_samples(self.model, random_batch)
+            gold_rm_reward = []
+            torch.cuda.empty_cache()
+            if self.args.reward_model_name_evaluation:
+                # https://huggingface.co/RLHFlow/ArmoRM-Llama3-8B-v0.1
+                device = self.accelerator.device # "cuda"
+                path = "RLHFlow/ArmoRM-Llama3-8B-v0.1"
+                gold_reward_model = AutoModelForSequenceClassification.from_pretrained(path, device_map=device,
+                                                                           trust_remote_code=True,
+                                                                           torch_dtype=torch.bfloat16)
+                tokenizer = AutoTokenizer.from_pretrained(path, use_fast=True)
+                # We load a random sample from the validation set of the HelpSteer dataset
+                # prompt = 'What are some synonyms for the word "beautiful"?'
+                # response = "Nicely, Beautifully, Handsome, Stunning, Wonderful, Gorgeous, Pretty, Stunning, Elegant"
+                # messages = [{"role": "user", "content": prompt},
+                #             {"role": "assistant", "content": response}]
+
+                for messages in messages_batch:
+                    input_ids = tokenizer.apply_chat_template(messages, return_tensors="pt").to(device)
+                    with torch.no_grad():
+                        output = gold_reward_model(input_ids)
+                        # Multi-objective rewards for the response
+                        multi_obj_rewards = output.rewards.cpu().float()
+                        # The gating layer's output is conditioned on the prompt
+                        gating_output = output.gating_output.cpu().float()
+                        # The preference score for the response, aggregated from the
+                        # multi-objective rewards with the gating layer
+                        preference_score = output.score.cpu().float()
+                        gold_rm_reward.append(preference_score.item())
+                        # We apply a transformation matrix to the multi-objective rewards
+                    # # before multiplying with the gating layer's output. This mainly aims
+                    # # at reducing the verbosity bias of the original reward objectives
+                    # obj_transform = gold_reward_model.reward_transform_matrix.data.cpu().float()
+                    # # The final coefficients assigned to each reward objective
+                    # multi_obj_coeffs = gating_output @ obj_transform.T
+                    # # The preference score is the linear combination of the multi-objective rewards with
+                    # # the multi-objective coefficients, which can be verified by the following assertion
+                    # assert torch.isclose(torch.sum(multi_obj_rewards * multi_obj_coeffs, dim=1), preference_score,
+                    #                      atol=1e-3)
+                    # # Find the top-K reward objectives with coefficients of the highest magnitude
+                    # K = 3
+                    # top_obj_dims = torch.argsort(torch.abs(multi_obj_coeffs), dim=1, descending=True, )[:, :K]
+                    # top_obj_coeffs = torch.gather(multi_obj_coeffs, dim=1, index=top_obj_dims)
+                    #
+                    # # The attributes of the 19 reward objectives
+                    # attributes = ['helpsteer-helpfulness', 'helpsteer-correctness', 'helpsteer-coherence',
+                    #               'helpsteer-complexity', 'helpsteer-verbosity', 'ultrafeedback-overall_score',
+                    #               'ultrafeedback-instruction_following', 'ultrafeedback-truthfulness',
+                    #               'ultrafeedback-honesty', 'ultrafeedback-helpfulness', 'beavertails-is_safe',
+                    #               'prometheus-score', 'argilla-overall_quality', 'argilla-judge_lm', 'code-complexity',
+                    #               'code-style', 'code-explanation', 'code-instruction-following', 'code-readability']
+                    #
+                    # example_index = 0
+                    # for i in range(K):
+                    #     attribute = attributes[top_obj_dims[example_index, i].item()]
+                    #     coeff = top_obj_coeffs[example_index, i].item()
+                    #     print(f"{attribute}: {round(coeff, 5)}")
+                    # # code-complexity: 0.19922
+                    # # helpsteer-verbosity: -0.10864
+                    # # ultrafeedback-instruction_following: 0.07861
+                    #
+                    # # The actual rewards of this example from the HelpSteer dataset
+                    # # are [3,3,4,2,2] for the five helpsteer objectives:
+                    # # helpfulness, correctness, coherence, complexity, verbosity
+                    # # We can linearly transform our predicted rewards to the
+                    # # original reward space to compare with the ground truth
+                    # helpsteer_rewards_pred = multi_obj_rewards[0, :5] * 5 - 0.5
+                    # print(helpsteer_rewards_pred)
+                    # # [2.78125   2.859375  3.484375  1.3847656 1.296875 ]
+
+                del gold_reward_model
+                torch.cuda.empty_cache()
+
+            metrics = {f"gold_rm_reward_prompt_{i}": r for i, r in enumerate(gold_rm_reward)}
+            metrics['gold_rm_reward_avg'] = sum(gold_rm_reward) / len(gold_rm_reward)
+            self.store_metrics(metrics, train_eval="eval")
 
             self.log(
                 {
                     "game_log": wandb.Table(
-                        columns=["Prompt", "Policy", "Ref Model"],
+                        columns=["Prompt", "Policy", "Ref Model", "Gold RM Reward"],
                         rows=[
-                            [prompt, pol[len(prompt) :], ref[len(prompt) :]]
-                            for prompt, pol, ref in zip(
-                                random_batch["prompt"], policy_output_decoded, ref_output_decoded
+                            [prompt, pol[len(prompt) :], ref[len(prompt) :], gold_reward]
+                            for prompt, pol, ref, gold_reward in zip(
+                                random_batch["prompt"], policy_output_decoded, ref_output_decoded, gold_rm_reward
                             )
                         ],
                     )
