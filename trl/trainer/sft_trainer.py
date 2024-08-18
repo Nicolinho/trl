@@ -44,7 +44,7 @@ from .sft_config import SFTConfig
 from .utils import (
     ConstantLengthDataset,
     DataCollatorForCompletionOnlyLM,
-    RichProgressCallback,
+    # RichProgressCallback,
     neftune_post_forward_hook,
     peft_module_casting_to_bf16,
     trl_sanitze_kwargs_for_tagging,
@@ -403,11 +403,11 @@ class SFTTrainer(Trainer):
         elif self.args.max_steps == -1 and args.packing:
             self.train_dataset.infinite = False
 
-        if any(isinstance(callback, RichProgressCallback) for callback in self.callback_handler.callbacks):
-            for callback in self.callback_handler.callbacks:
-                # Remove the PrinterCallback to avoid duplicated prints in case we passed a `RichProgressCallback`
-                if callback.__class__.__name__ == "PrinterCallback":
-                    self.callback_handler.pop_callback(callback)
+        # if any(isinstance(callback, RichProgressCallback) for callback in self.callback_handler.callbacks):
+        #     for callback in self.callback_handler.callbacks:
+        #         # Remove the PrinterCallback to avoid duplicated prints in case we passed a `RichProgressCallback`
+        #         if callback.__class__.__name__ == "PrinterCallback":
+        #             self.callback_handler.pop_callback(callback)
 
     @wraps(Trainer.train)
     def train(self, *args, **kwargs):
