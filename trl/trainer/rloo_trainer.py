@@ -267,15 +267,15 @@ class RLOOTrainer(Trainer):
                 ref_logprobs = []
                 scores = []
                 sequence_lengths = []
-                # with unwrap_model_for_generation(model, self.accelerator) as unwrapped_model:
-                query_responses, logitss = batch_generation(
-                    # unwrapped_model, #TODO unwrapped model is the same as the ref policy if using a single model with lora
-                    model,
-                    queries,
-                    args.local_rollout_forward_batch_size,
-                    tokenizer.pad_token_id,
-                    generation_config,
-                )
+                with unwrap_model_for_generation(model, self.accelerator) as unwrapped_model:
+                    query_responses, logitss = batch_generation(
+                        unwrapped_model, #TODO unwrapped model is the same as the ref policy if using a single model with lora
+                        # model,
+                        queries,
+                        args.local_rollout_forward_batch_size,
+                        tokenizer.pad_token_id,
+                        generation_config,
+                    )
 
                 for i in range(0, queries.shape[0], args.local_rollout_forward_batch_size):
                     query = queries[i : i + args.local_rollout_forward_batch_size]
