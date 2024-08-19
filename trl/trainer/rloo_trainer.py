@@ -302,6 +302,8 @@ class RLOOTrainer(Trainer):
                             args.stop_token_id, tokenizer.pad_token_id, response
                         )
 
+                    # TODO mask out bos_token ?! its removed for training the reward model
+                    # TODO also check sequenth length, seems to be incorrect
                     # Response Processing 2. run reward model on the truncated responses
                     postprocessed_query_response = torch.cat((query, postprocessed_response), 1)
                     sequence_length = first_true_indices(postprocessed_response == tokenizer.pad_token_id) - 1
