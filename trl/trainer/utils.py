@@ -975,8 +975,8 @@ def get_reward(
     """
     attention_mask = query_responses != pad_token_id
     position_ids = attention_mask.cumsum(1) - attention_mask.long()  # exclusive cumsum
-    lm_backbone = getattr(model, model.base_model_prefix)
     input_ids = torch.masked_fill(query_responses, ~attention_mask, 0)
+    # lm_backbone = getattr(model, model.base_model_prefix)
     # output = lm_backbone(
     #     input_ids=input_ids,
     #     attention_mask=attention_mask,
