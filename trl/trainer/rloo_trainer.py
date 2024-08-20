@@ -64,7 +64,7 @@ class RLOOTrainer(Trainer):
         args = config
         self.tokenizer = tokenizer
         self.policy = policy
-
+        # TODO WHY
         self.policy.generation_config.eos_token_id = (
             None  # disable `pad_token_id` and `eos_token_id` because we just want to
         )
