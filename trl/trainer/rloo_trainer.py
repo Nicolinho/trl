@@ -304,6 +304,9 @@ class RLOOTrainer(Trainer):
 
                     # Response Processing 2. run reward model on the truncated responses
                     postprocessed_query_response = torch.cat((query, postprocessed_response), 1)
+                    #TODO for my armo style reward model, remove bos token as this is how the model was trained
+                    postprocessed_query_response = torch.where(
+                        postprocessed_query_response == tokenizer.bos_token_id, tokenizer.pad_token_id, postprocessed_query_response)
                     sequence_length = first_true_indices(postprocessed_response == tokenizer.pad_token_id) - 1
                     _, score, _ = get_reward(
                         reward_model, postprocessed_query_response, tokenizer.pad_token_id, context_length
