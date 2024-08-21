@@ -333,7 +333,7 @@ class RLOOTrainer(Trainer):
                 # only query humans on responses that pass that filter
                 # contain_eos_token = torch.any(postprocessed_responses == tokenizer.eos_token_id, dim=-1)
                 # TODO for my armo style reward model, remove bos token as this is how the model was trained
-                contain_eos_token = torch.any(postprocessed_responses == tokenizer.stop_token_id, dim=-1)
+                contain_eos_token = torch.any(postprocessed_responses == args.stop_token_id, dim=-1)
                 if args.non_eos_penalty:
                     scores = torch.where(contain_eos_token, scores, args.penalty_reward_value)
                 # accelerator.print(f"{scores=}, {(contain_eos_token.sum() / len(contain_eos_token))=}")
