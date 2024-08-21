@@ -306,6 +306,9 @@ class RLOOTrainer(Trainer):
                     # TODO also check sequenth length, seems to be incorrect
                     # Response Processing 2. run reward model on the truncated responses
                     postprocessed_query_response = torch.cat((query, postprocessed_response), 1)
+                    #TODO for my armo style reward model, remove bos token as this is how the model was trained
+                    postprocessed_query_response = torch.where(
+                        postprocessed_query_response == tokenizer.bos_token_id, tokenizer.pad_token_id, postprocessed_query_response)
                     sequence_length = first_true_indices(postprocessed_response == tokenizer.pad_token_id) - 1
                     _, score, _ = get_reward(
                         reward_model, postprocessed_query_response, tokenizer.pad_token_id, context_length
@@ -330,7 +333,9 @@ class RLOOTrainer(Trainer):
                 # Response Processing 3. filter response. Ensure that the sample contains stop_token_id
                 # responses not passing that filter will receive a low (fixed) score
                 # only query humans on responses that pass that filter
-                contain_eos_token = torch.any(postprocessed_responses == tokenizer.eos_token_id, dim=-1)
+                # contain_eos_token = torch.any(postprocessed_responses == tokenizer.eos_token_id, dim=-1)
+                # TODO for my armo style reward model, remove bos token as this is how the model was trained
+                contain_eos_token = torch.any(postprocessed_responses == args.stop_token_id, dim=-1)
                 if args.non_eos_penalty:
                     scores = torch.where(contain_eos_token, scores, args.penalty_reward_value)
                 # accelerator.print(f"{scores=}, {(contain_eos_token.sum() / len(contain_eos_token))=}")
@@ -436,7 +441,8 @@ class RLOOTrainer(Trainer):
                 metrics["policy/entropy_avg"] = self.accelerator.gather(entropy_stats).mean().item()
                 metrics["val/ratio"] = self.accelerator.gather(ratio_stats).mean().item()
                 metrics["val/ratio_var"] = self.accelerator.gather(ratio_stats).var().item()
-                metrics["val/num_eos_tokens"] = (responses == tokenizer.eos_token_id).sum().item()
+                # metrics["val/num_eos_tokens"] = (responses == tokenizer.eos_token_id).sum().item()
+                metrics["val/num_eos_tokens"] = (responses == args.stop_token_id).sum().item()
                 metrics["lr"] = self.lr_scheduler.get_last_lr()[0]
                 metrics["episode"] = self.state.episode
                 self.state.epoch = self.state.episode / self.train_dataset_len  # used by self.log
