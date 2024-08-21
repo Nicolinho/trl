@@ -371,6 +371,7 @@ class RLOOTrainer(Trainer):
                             micro_batch_end = micro_batch_start + args.per_device_train_batch_size
                             micro_batch_inds = mini_batch_inds[micro_batch_start:micro_batch_end]
                             mb_advantage = advantages[micro_batch_inds]
+                            #TODO why not use truncated responses?
                             mb_responses = responses[micro_batch_inds]
                             mb_query_responses = query_responses[micro_batch_inds]
                             mb_logprobs = logprobs[micro_batch_inds]
