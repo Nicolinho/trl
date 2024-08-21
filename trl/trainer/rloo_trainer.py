@@ -518,7 +518,7 @@ class RLOOTrainer(Trainer):
                         import wandb
                         if self.accelerator.process_index == 0:
                             for qt, entopy, s in zip(qt_estimates_list, entropy_list, score_list):
-                                plot_obj = plot_quantile_histogram(self.reward_model.quantiles.cpu().numpy(), qt, s)
+                                plot_obj = plot_quantile_histogram(self.accelerator.unwrap_model(self.reward_model).quantiles.cpu().numpy(), qt, s)
                                 table["reward_distribution"].extend([wandb.Image(plot_obj)])
                                 plt.close()
 
