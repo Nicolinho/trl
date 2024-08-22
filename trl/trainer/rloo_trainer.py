@@ -512,7 +512,7 @@ class RLOOTrainer(Trainer):
                     table["score"].extend(score_list)
                     # table["score"].extend(self.accelerator.gather(score).float().cpu().numpy())
                     qt_estimates_list = self.accelerator.gather(qt_estimates).float().cpu().numpy()
-                    entropy_list = self.accelerator.gather(entropy).float().cpu().numpy()
+                    entropy_list = self.accelerator.gather(entropy.squeeze(1)).float().cpu().numpy()
                     table["reward dist entropy"].extend(entropy_list)
                     if "wandb" in args.report_to:
                         import wandb
