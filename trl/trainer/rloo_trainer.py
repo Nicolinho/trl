@@ -520,6 +520,7 @@ class RLOOTrainer(Trainer):
                         st = time.time()
                         quantiles = self.accelerator.unwrap_model(self.reward_model).quantiles.cpu().numpy()
                         print("Getting quantiles with unwrap took seconds: ", time.time() - st)
+
                         if self.accelerator.process_index == 0:
                             for qt, entopy, s in zip(qt_estimates_list, entropy_list, score_list):
                                 plot_obj = plot_quantile_histogram(quantiles, qt, s)
