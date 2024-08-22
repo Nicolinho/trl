@@ -516,9 +516,13 @@ class RLOOTrainer(Trainer):
                     table["reward dist entropy"].extend(entropy_list)
                     if "wandb" in args.report_to:
                         import wandb
+                        import time
+                        st = time.time()
+                        quantiles = self.accelerator.unwrap_model(self.reward_model).quantiles.cpu().numpy()
+                        print("Getting quantiles with unwrap took seconds: ", time.time() - st)
                         if self.accelerator.process_index == 0:
                             for qt, entopy, s in zip(qt_estimates_list, entropy_list, score_list):
-                                plot_obj = plot_quantile_histogram(self.accelerator.unwrap_model(self.reward_model).quantiles.cpu().numpy(), qt, s)
+                                plot_obj = plot_quantile_histogram(quantiles, qt, s)
                                 table["reward_distribution"].extend([wandb.Image(plot_obj)])
                                 plt.close()
 
