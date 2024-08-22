@@ -6,6 +6,8 @@ from collections import defaultdict
 from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
+import matplotlib.pyplot as plt
+from scipy.interpolate import interp1d
 import pandas as pd
 import torch
 import torch.nn as nn
@@ -266,6 +268,7 @@ class RLOOTrainer(Trainer):
                 logprobs = []
                 ref_logprobs = []
                 scores = []
+                reward_dist_entropy = []
                 sequence_lengths = []
                 with unwrap_model_for_generation(model, self.accelerator) as unwrapped_model:
                     query_responses, logitss = batch_generation(
@@ -310,7 +313,7 @@ class RLOOTrainer(Trainer):
                     postprocessed_query_response = torch.where(
                         postprocessed_query_response == tokenizer.bos_token_id, tokenizer.pad_token_id, postprocessed_query_response)
                     sequence_length = first_true_indices(postprocessed_response == tokenizer.pad_token_id) - 1
-                    _, score, _ = get_reward(
+                    _, score, _, qt_estimates, entropy = get_reward(
                         reward_model, postprocessed_query_response, tokenizer.pad_token_id, context_length
                     )
 
@@ -320,12 +323,14 @@ class RLOOTrainer(Trainer):
                     ref_logprobs.append(ref_logprob)
                     sequence_lengths.append(sequence_length)
                     scores.append(score)
+                    reward_dist_entropy.append(entropy)
                 responses = torch.cat(responses, 0)
                 postprocessed_responses = torch.cat(postprocessed_responses, 0)
                 logprobs = torch.cat(logprobs, 0)
                 ref_logprobs = torch.cat(ref_logprobs, 0)
                 sequence_lengths = torch.cat(sequence_lengths, 0)
                 scores = torch.cat(scores, 0)
+                reward_dist_entropy = torch.cat(reward_dist_entropy, 0)
                 del (logprob, ref_logprob, score)
                 torch.cuda.empty_cache()
                 gc.collect()
@@ -434,6 +439,7 @@ class RLOOTrainer(Trainer):
                 metrics["objective/non_score_reward"] = self.accelerator.gather(mean_non_score_reward).mean().item()
                 metrics["objective/rlhf_reward"] = self.accelerator.gather(rlhf_reward).mean().item()
                 metrics["objective/scores"] = self.accelerator.gather(scores.mean()).mean().item()
+                metrics["objective/reward_dist_entropy"] = self.accelerator.gather(reward_dist_entropy.mean()).mean().item()
                 metrics["policy/approxkl_avg"] = self.accelerator.gather(approxkl_stats).mean().item()
                 metrics["policy/clipfrac_avg"] = self.accelerator.gather(pg_clipfrac_stats).mean().item()
                 metrics["loss/policy_avg"] = self.accelerator.gather(pg_loss_stats).mean().item()
@@ -502,13 +508,31 @@ class RLOOTrainer(Trainer):
                     table["model response"].extend(gather_object(tokenizer.batch_decode(postprocessed_response)))
 
                     postprocessed_query_response = torch.cat((query, postprocessed_response), 1)
-                    _, score, _ = get_reward(
+                    _, score, _, qt_estimates, entropy = get_reward(
                         self.reward_model, postprocessed_query_response, tokenizer.pad_token_id, context_length
                     )
-                    table["score"].extend(self.accelerator.gather(score).float().cpu().numpy())
+                    score_list = self.accelerator.gather(score).float().cpu().numpy()
+                    table["score"].extend(score_list)
+                    # table["score"].extend(self.accelerator.gather(score).float().cpu().numpy())
+                    qt_estimates_list = self.accelerator.gather(qt_estimates).float().cpu().numpy()
+                    entropy_list = self.accelerator.gather(entropy).float().cpu().numpy()
+                    table["reward dist entropy"].extend(entropy_list)
+                    if "wandb" in args.report_to:
+                        import wandb
+                        import time
+                        st = time.time()
+                        quantiles = self.accelerator.unwrap_model(self.reward_model).quantiles.cpu().numpy()
+                        print("Getting quantiles with unwrap took seconds: ", time.time() - st)
+
+                        if self.accelerator.process_index == 0:
+                            for qt, entopy, s in zip(qt_estimates_list, entropy_list, score_list):
+                                plot_obj = plot_quantile_histogram(quantiles, qt, s)
+                                table["reward_distribution"].extend([wandb.Image(plot_obj)])
+                                plt.close()
 
                 if sampling:
                     break
+        table["model response"] = [resp.replace("[PAD]", "") for resp in table["model response"]]
         df = pd.DataFrame(table)
         if self.accelerator.process_index == 0:
             print_rich_table(df.iloc[0 : 0 + 5])
@@ -516,4 +540,27 @@ class RLOOTrainer(Trainer):
             import wandb
 
             if wandb.run is not None:
-                wandb.log({"completions": wandb.Table(dataframe=df)})
+                wandb.log({f"completions step {self.state.global_step}": wandb.Table(dataframe=df)})
+
+def plot_quantile_histogram(quantiles, values, prediction):
+    # quantiles = [0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99]
+    # values =    [1.2, 1.5, 1.7, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5]
+    # Create an interpolation function
+    interp_func = interp1d(quantiles, values, kind='linear', fill_value="extrapolate")
+
+    # Generate a larger sample of quantiles
+    sample_quantiles = np.linspace(0, 1, 1000)
+    sample_values = interp_func(sample_quantiles)
+    plt.figure(figsize=(10, 6))
+    plt.hist(sample_values, bins=30, density=True, alpha=0.6, color='b', edgecolor='black')
+
+    # Plot the interpolated PDF as a line plot for reference
+    plt.plot(sample_values, np.zeros_like(sample_values), 'o', label='Interpolated Data Points', markersize=2)
+    plt.axvline(prediction, color='r', linestyle='--', linewidth=2, label='Expectation (point estimate)')
+
+    plt.title('Histogram Approximating the PDF from Quantiles')
+    plt.xlabel('Value')
+    plt.ylabel('Density')
+    plt.legend()
+
+    return plt
