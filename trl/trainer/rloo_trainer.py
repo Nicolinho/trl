@@ -268,8 +268,11 @@ class RLOOTrainer(Trainer):
                 logprobs = []
                 ref_logprobs = []
                 scores = []
+                scores_armo = []
                 reward_dist_entropy = []
                 rewards_adjusted_all = []
+                rewards_adjusted_armo_all = []
+                gating_output_armo_all = []
                 gating_output_all = []
                 sequence_lengths = []
                 with unwrap_model_for_generation(model, self.accelerator) as unwrapped_model:
@@ -319,7 +322,7 @@ class RLOOTrainer(Trainer):
                     postprocessed_query_response = torch.where(
                         postprocessed_query_response == tokenizer.bos_token_id, tokenizer.pad_token_id, postprocessed_query_response)
                     sequence_length = first_true_indices(postprocessed_response == tokenizer.pad_token_id) - 1
-                    _, score, _, qt_estimates, entropy, gating_output, rewards_adjusted = get_reward(
+                    score, qt_estimates, entropy, gating_output, rewards_adjusted, score_armo, rewards_adjusted_armo, gating_output_armo = get_reward(
                         reward_model, postprocessed_query_response, tokenizer.pad_token_id, context_length
                     )
 
@@ -329,18 +332,24 @@ class RLOOTrainer(Trainer):
                     ref_logprobs.append(ref_logprob)
                     sequence_lengths.append(sequence_length)
                     scores.append(score)
-                    # reward_dist_entropy.append(entropy)
+                    scores_armo.append(score_armo)
+                    reward_dist_entropy.append(entropy)
                     gating_output_all.append(gating_output)
+                    gating_output_armo_all.append(gating_output_armo)
                     rewards_adjusted_all.append(rewards_adjusted)
+                    rewards_adjusted_armo_all.append(rewards_adjusted_armo)
                 responses = torch.cat(responses, 0)
                 postprocessed_responses = torch.cat(postprocessed_responses, 0)
                 # logprobs = torch.cat(logprobs, 0)
                 ref_logprobs = torch.cat(ref_logprobs, 0)
                 sequence_lengths = torch.cat(sequence_lengths, 0)
                 scores = torch.cat(scores, 0)
+                scores_armo = torch.cat(scores_armo, 0)
                 # reward_dist_entropy = torch.cat(reward_dist_entropy, 0)
                 rewards_adjusted_all = torch.cat(rewards_adjusted_all, 0)
+                rewards_adjusted_armo_all = torch.cat(rewards_adjusted_armo_all, 0)
                 gating_output_all = torch.cat(gating_output_all, 0)
+                gating_output_armo_all = torch.cat(gating_output_armo_all, 0)
                 # del (logprob, ref_logprob, score)
                 del (ref_logprob, score)
                 torch.cuda.empty_cache()
@@ -354,6 +363,7 @@ class RLOOTrainer(Trainer):
                 contain_eos_token = torch.any(postprocessed_responses == args.stop_token_id, dim=-1)
                 if args.non_eos_penalty:
                     scores = torch.where(contain_eos_token, scores, args.penalty_reward_value)
+                    scores_armo = torch.where(contain_eos_token, scores_armo, args.penalty_reward_value)
                 # accelerator.print(f"{scores=}, {(contain_eos_token.sum() / len(contain_eos_token))=}")
 
                 # be very careful with `padding_mask_p1`; see https://excalidraw.com/#json=LWnzG4w2k5DjF_EOL_xPt,e2w3a-hFJ_gX5vOfeyXGTw
@@ -444,17 +454,18 @@ class RLOOTrainer(Trainer):
                 mean_kl = kl.sum(1).mean()
                 mean_entropy = (-logprobs).sum(1).mean()
                 mean_non_score_reward = non_score_reward.mean()
-                # entropy_reward = entropy_reward.mean()
+                entropy_reward = entropy_reward.mean()
                 eps = int(self.state.episode / (time.time() - start_time))
                 metrics = {}
                 metrics["eps"] = eps
                 metrics["objective/kl"] = self.accelerator.gather(mean_kl).mean().item()
                 metrics["objective/entropy"] = self.accelerator.gather(mean_entropy).mean().item()
                 metrics["objective/non_score_reward"] = self.accelerator.gather(mean_non_score_reward).mean().item()
-                # metrics["objective/entropy_reward"] = self.accelerator.gather(entropy_reward).mean().item()
+                metrics["objective/entropy_reward"] = self.accelerator.gather(entropy_reward).mean().item()
                 metrics["objective/rlhf_reward"] = self.accelerator.gather(rlhf_reward).mean().item()
                 metrics["objective/scores"] = self.accelerator.gather(scores.mean()).mean().item()
-                # metrics["objective/reward_dist_entropy"] = self.accelerator.gather(reward_dist_entropy.mean()).mean().item()
+                metrics["objective/scores_armo"] = self.accelerator.gather(scores_armo.mean()).mean().item()
+                metrics["objective/reward_dist_entropy"] = self.accelerator.gather(reward_dist_entropy.mean()).mean().item()
                 metrics["policy/approxkl_avg"] = self.accelerator.gather(approxkl_stats).mean().item()
                 metrics["policy/clipfrac_avg"] = self.accelerator.gather(pg_clipfrac_stats).mean().item()
                 metrics["loss/policy_avg"] = self.accelerator.gather(pg_loss_stats).mean().item()
@@ -467,11 +478,21 @@ class RLOOTrainer(Trainer):
                 metrics["val/num_eos_tokens"] = (responses == args.stop_token_id).sum().item()
                 metrics["lr"] = self.lr_scheduler.get_last_lr()[0]
                 metrics["episode"] = self.state.episode
-                gating_output = self.accelerator.gather(gating_output_all).mean(0)
-                rewards_adjusted = self.accelerator.gather(rewards_adjusted_all).mean(0)
-                for i, a in enumerate(self.accelerator.unwrap_model(self.reward_model).attributes):
-                    metrics[f"gating_output/{a}"] = gating_output[i].item()
-                    metrics[f"rewards_adjusted/{a}"] = rewards_adjusted[i].item()
+                if "wandb" in args.report_to:
+                    import wandb
+                    gating_output = self.accelerator.gather(gating_output_all).mean(0)
+                    rewards_adjusted = self.accelerator.gather(rewards_adjusted_all).mean(0)
+                    gating_output_armo_all = self.accelerator.gather(gating_output_armo_all).mean(0)
+                    rewards_adjusted_armo_all = self.accelerator.gather(rewards_adjusted_armo_all).mean(0)
+                    costum_logs = {}
+                    for i, a in enumerate(self.accelerator.unwrap_model(self.reward_model).attributes):
+                        metrics[f"gating_output/{a}"] = gating_output[i].item()
+                        metrics[f"rewards_adjusted/{a}"] = rewards_adjusted[i].item()
+                        metrics[f"gating_output_armo/{a}"] = gating_output_armo_all[i].item()
+                        metrics[f"rewards_adjusted_armo/{a}"] = rewards_adjusted_armo_all[i].item()
+
+                    wandb.log({**costum_logs, "train/global_step": self.state.global_step})
+
                 self.state.epoch = self.state.episode / self.train_dataset_len  # used by self.log
                 self.state.global_step += 1
                 self.log(metrics)
@@ -529,7 +550,7 @@ class RLOOTrainer(Trainer):
                     table["model response"].extend(gather_object(tokenizer.batch_decode(postprocessed_response)))
 
                     postprocessed_query_response = torch.cat((query, postprocessed_response), 1)
-                    _, score, _, qt_estimates, entropy, gating_output, rewards_adjusted = get_reward(
+                    score, qt_estimates, entropy, gating_output, rewards_adjusted, score_armo, rewards_adjusted_armo, gating_output_armo = get_reward(
                         self.reward_model, postprocessed_query_response, tokenizer.pad_token_id, context_length
                     )
                     score_list = self.accelerator.gather(score).float().cpu().numpy()
@@ -537,24 +558,24 @@ class RLOOTrainer(Trainer):
                     # table["score"].extend(self.accelerator.gather(score).float().cpu().numpy())
 
 
-                    # qt_estimates_list = self.accelerator.gather(qt_estimates).float().cpu().numpy()
-                    # entropy_list = self.accelerator.gather(entropy.squeeze(1)).float().cpu().numpy()
+                    qt_estimates_list = self.accelerator.gather(qt_estimates).float().cpu().numpy()
+                    entropy_list = self.accelerator.gather(entropy.squeeze(1)).float().cpu().numpy()
                     gating_output = self.accelerator.gather(gating_output).float().cpu().numpy()
                     rewards_adjusted = self.accelerator.gather(rewards_adjusted).float().cpu().numpy()
-                    # table["reward dist entropy"].extend(entropy_list)
+                    table["reward dist entropy"].extend(entropy_list)
                     if "wandb" in args.report_to:
                         import wandb
                         import time
                         st = time.time()
-                    #     quantiles = self.accelerator.unwrap_model(self.reward_model).quantiles.cpu().numpy()
-                    #     print("Getting quantiles with unwrap took seconds: ", time.time() - st)
+                        quantiles = self.accelerator.unwrap_model(self.reward_model).quantiles.cpu().numpy()
+                        print("Getting quantiles with unwrap took seconds: ", time.time() - st)
                     #
                         if self.accelerator.process_index == 0:
-                    #         print("Create plots")
-                    #         for qt, entopy, s in zip(qt_estimates_list, entropy_list, score_list):
-                    #             plot_obj = plot_quantile_histogram(quantiles, qt, s)
-                    #             table["reward_distribution"].extend([wandb.Image(plot_obj)])
-                    #             plt.close()
+                            print("Create plots")
+                            for qt, entopy, s in zip(qt_estimates_list, entropy_list, score_list):
+                                plot_obj = plot_quantile_histogram(quantiles, qt, s)
+                                table["reward_distribution"].extend([wandb.Image(plot_obj)])
+                                plt.close()
                             for gat, rew in zip(gating_output, rewards_adjusted):
                                 plt.bar(range(len(gat)), gat)
                                 table["gating_output"].extend([wandb.Image(plt)])
