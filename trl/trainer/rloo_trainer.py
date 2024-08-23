@@ -329,18 +329,18 @@ class RLOOTrainer(Trainer):
                     ref_logprobs.append(ref_logprob)
                     sequence_lengths.append(sequence_length)
                     scores.append(score)
-                    reward_dist_entropy.append(entropy)
-                    gating_output_all.append(gating_output)
-                    rewards_adjusted_all.append(rewards_adjusted)
+                    # reward_dist_entropy.append(entropy)
+                    # gating_output_all.append(gating_output)
+                    # rewards_adjusted_all.append(rewards_adjusted)
                 responses = torch.cat(responses, 0)
                 postprocessed_responses = torch.cat(postprocessed_responses, 0)
                 # logprobs = torch.cat(logprobs, 0)
                 ref_logprobs = torch.cat(ref_logprobs, 0)
                 sequence_lengths = torch.cat(sequence_lengths, 0)
                 scores = torch.cat(scores, 0)
-                reward_dist_entropy = torch.cat(reward_dist_entropy, 0)
-                rewards_adjusted_all = torch.cat(rewards_adjusted_all, 0)
-                gating_output_all = torch.cat(gating_output_all, 0)
+                # reward_dist_entropy = torch.cat(reward_dist_entropy, 0)
+                # rewards_adjusted_all = torch.cat(rewards_adjusted_all, 0)
+                # gating_output_all = torch.cat(gating_output_all, 0)
                 # del (logprob, ref_logprob, score)
                 del (ref_logprob, score)
                 torch.cuda.empty_cache()
@@ -365,8 +365,9 @@ class RLOOTrainer(Trainer):
                 # 4. compute rewards
                 kl = logprobs - ref_logprobs
                 non_score_reward = (-args.kl_coef * kl).sum(1)
-                entropy_reward = -args.entropy_coef * reward_dist_entropy.squeeze(1)
-                rlhf_reward = scores + non_score_reward + entropy_reward
+                # entropy_reward = -args.entropy_coef * reward_dist_entropy.squeeze(1)
+                rlhf_reward = scores + non_score_reward
+                # rlhf_reward = scores + non_score_reward + entropy_reward
 
                 # vectorized RLOO advantages implementation
                 rlhf_reward = rlhf_reward.reshape(args.rloo_k, -1)
@@ -450,10 +451,10 @@ class RLOOTrainer(Trainer):
                 metrics["objective/kl"] = self.accelerator.gather(mean_kl).mean().item()
                 metrics["objective/entropy"] = self.accelerator.gather(mean_entropy).mean().item()
                 metrics["objective/non_score_reward"] = self.accelerator.gather(mean_non_score_reward).mean().item()
-                metrics["objective/entropy_reward"] = self.accelerator.gather(entropy_reward).mean().item()
+                # metrics["objective/entropy_reward"] = self.accelerator.gather(entropy_reward).mean().item()
                 metrics["objective/rlhf_reward"] = self.accelerator.gather(rlhf_reward).mean().item()
                 metrics["objective/scores"] = self.accelerator.gather(scores.mean()).mean().item()
-                metrics["objective/reward_dist_entropy"] = self.accelerator.gather(reward_dist_entropy.mean()).mean().item()
+                # metrics["objective/reward_dist_entropy"] = self.accelerator.gather(reward_dist_entropy.mean()).mean().item()
                 metrics["policy/approxkl_avg"] = self.accelerator.gather(approxkl_stats).mean().item()
                 metrics["policy/clipfrac_avg"] = self.accelerator.gather(pg_clipfrac_stats).mean().item()
                 metrics["loss/policy_avg"] = self.accelerator.gather(pg_loss_stats).mean().item()
@@ -466,11 +467,11 @@ class RLOOTrainer(Trainer):
                 metrics["val/num_eos_tokens"] = (responses == args.stop_token_id).sum().item()
                 metrics["lr"] = self.lr_scheduler.get_last_lr()[0]
                 metrics["episode"] = self.state.episode
-                gating_output = self.accelerator.gather(gating_output_all).mean(0)
-                rewards_adjusted = self.accelerator.gather(rewards_adjusted_all).mean(0)
-                for i, a in enumerate(self.accelerator.unwrap_model(self.reward_model).attributes):
-                    metrics[f"gating_output/{a}"] = gating_output[i].item()
-                    metrics[f"rewards_adjusted/{a}"] = rewards_adjusted[i].item()
+                # gating_output = self.accelerator.gather(gating_output_all).mean(0)
+                # rewards_adjusted = self.accelerator.gather(rewards_adjusted_all).mean(0)
+                # for i, a in enumerate(self.accelerator.unwrap_model(self.reward_model).attributes):
+                #     metrics[f"gating_output/{a}"] = gating_output[i].item()
+                #     metrics[f"rewards_adjusted/{a}"] = rewards_adjusted[i].item()
                 self.state.epoch = self.state.episode / self.train_dataset_len  # used by self.log
                 self.state.global_step += 1
                 self.log(metrics)
@@ -534,30 +535,30 @@ class RLOOTrainer(Trainer):
                     table["score"].extend(score_list)
                     # table["score"].extend(self.accelerator.gather(score).float().cpu().numpy())
                     qt_estimates_list = self.accelerator.gather(qt_estimates).float().cpu().numpy()
-                    entropy_list = self.accelerator.gather(entropy.squeeze(1)).float().cpu().numpy()
-                    gating_output = self.accelerator.gather(gating_output).float().cpu().numpy()
-                    rewards_adjusted = self.accelerator.gather(rewards_adjusted).float().cpu().numpy()
-                    table["reward dist entropy"].extend(entropy_list)
-                    if "wandb" in args.report_to:
-                        import wandb
-                        import time
-                        st = time.time()
-                        quantiles = self.accelerator.unwrap_model(self.reward_model).quantiles.cpu().numpy()
-                        print("Getting quantiles with unwrap took seconds: ", time.time() - st)
-
-                        if self.accelerator.process_index == 0:
-                            print("Create plots")
-                            for qt, entopy, s in zip(qt_estimates_list, entropy_list, score_list):
-                                plot_obj = plot_quantile_histogram(quantiles, qt, s)
-                                table["reward_distribution"].extend([wandb.Image(plot_obj)])
-                                plt.close()
-                            for gat, rew in zip(gating_output, rewards_adjusted):
-                                plt.bar(range(len(gat)), gat)
-                                table["gating_output"].extend([wandb.Image(plt)])
-                                plt.close()
-                                plt.bar(range(len(rew)), rew)
-                                table["rewards_adjusted"].extend([wandb.Image(plt)])
-                                plt.close()
+                    # entropy_list = self.accelerator.gather(entropy.squeeze(1)).float().cpu().numpy()
+                    # gating_output = self.accelerator.gather(gating_output).float().cpu().numpy()
+                    # rewards_adjusted = self.accelerator.gather(rewards_adjusted).float().cpu().numpy()
+                    # table["reward dist entropy"].extend(entropy_list)
+                    # if "wandb" in args.report_to:
+                    #     import wandb
+                    #     import time
+                    #     st = time.time()
+                    #     quantiles = self.accelerator.unwrap_model(self.reward_model).quantiles.cpu().numpy()
+                    #     print("Getting quantiles with unwrap took seconds: ", time.time() - st)
+                    #
+                    #     if self.accelerator.process_index == 0:
+                    #         print("Create plots")
+                    #         for qt, entopy, s in zip(qt_estimates_list, entropy_list, score_list):
+                    #             plot_obj = plot_quantile_histogram(quantiles, qt, s)
+                    #             table["reward_distribution"].extend([wandb.Image(plot_obj)])
+                    #             plt.close()
+                    #         for gat, rew in zip(gating_output, rewards_adjusted):
+                    #             plt.bar(range(len(gat)), gat)
+                    #             table["gating_output"].extend([wandb.Image(plt)])
+                    #             plt.close()
+                    #             plt.bar(range(len(rew)), rew)
+                    #             table["rewards_adjusted"].extend([wandb.Image(plt)])
+                    #             plt.close()
 
                 if sampling:
                     break
