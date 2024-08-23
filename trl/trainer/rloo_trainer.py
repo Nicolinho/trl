@@ -522,7 +522,7 @@ class RLOOTrainer(Trainer):
                     table["model response"].extend(gather_object(tokenizer.batch_decode(postprocessed_response)))
 
                     postprocessed_query_response = torch.cat((query, postprocessed_response), 1)
-                    _, score, _, qt_estimates, entropy = get_reward(
+                    _, score, _, qt_estimates, entropy, gating_output, rewards_adjusted = get_reward(
                         self.reward_model, postprocessed_query_response, tokenizer.pad_token_id, context_length
                     )
                     score_list = self.accelerator.gather(score).float().cpu().numpy()
@@ -530,6 +530,8 @@ class RLOOTrainer(Trainer):
                     # table["score"].extend(self.accelerator.gather(score).float().cpu().numpy())
                     qt_estimates_list = self.accelerator.gather(qt_estimates).float().cpu().numpy()
                     entropy_list = self.accelerator.gather(entropy.squeeze(1)).float().cpu().numpy()
+                    gating_output = self.accelerator.gather(gating_output).float().cpu().numpy()
+                    rewards_adjusted = self.accelerator.gather(rewards_adjusted).float().cpu().numpy()
                     table["reward dist entropy"].extend(entropy_list)
                     if "wandb" in args.report_to:
                         import wandb
@@ -543,6 +545,13 @@ class RLOOTrainer(Trainer):
                             for qt, entopy, s in zip(qt_estimates_list, entropy_list, score_list):
                                 plot_obj = plot_quantile_histogram(quantiles, qt, s)
                                 table["reward_distribution"].extend([wandb.Image(plot_obj)])
+                                plt.close()
+                            for gat, rew in zip(gating_output, rewards_adjusted):
+                                plt.bar(range(len(gat)), gat)
+                                table["gating_output"].extend([wandb.Image(plt)])
+                                plt.close()
+                                plt.bar(range(len(rew)), rew)
+                                table["rewards_adjusted"].extend([wandb.Image(plt)])
                                 plt.close()
 
                 if sampling:
