@@ -18,6 +18,8 @@ class RLOOConfig(OnPolicyConfig):
     """whether to whiten the rewards"""
     kl_coef: float = 0.05
     """the KL coefficient"""
+    entropy_coef: float = 0.
+    """the KL coefficient"""
     cliprange: float = 0.2
     """the clip range"""
 

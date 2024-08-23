@@ -269,6 +269,8 @@ class RLOOTrainer(Trainer):
                 ref_logprobs = []
                 scores = []
                 reward_dist_entropy = []
+                rewards_adjusted_all = []
+                gating_output_all = []
                 sequence_lengths = []
                 with unwrap_model_for_generation(model, self.accelerator) as unwrapped_model:
                     query_responses, logitss = batch_generation(
@@ -311,7 +313,7 @@ class RLOOTrainer(Trainer):
                     postprocessed_query_response = torch.where(
                         postprocessed_query_response == tokenizer.bos_token_id, tokenizer.pad_token_id, postprocessed_query_response)
                     sequence_length = first_true_indices(postprocessed_response == tokenizer.pad_token_id) - 1
-                    _, score, _, qt_estimates, entropy = get_reward(
+                    _, score, _, qt_estimates, entropy, gating_output, rewards_adjusted = get_reward(
                         reward_model, postprocessed_query_response, tokenizer.pad_token_id, context_length
                     )
 
@@ -322,6 +324,8 @@ class RLOOTrainer(Trainer):
                     sequence_lengths.append(sequence_length)
                     scores.append(score)
                     reward_dist_entropy.append(entropy)
+                    gating_output_all.append(gating_output)
+                    rewards_adjusted_all.append(rewards_adjusted)
                 responses = torch.cat(responses, 0)
                 postprocessed_responses = torch.cat(postprocessed_responses, 0)
                 logprobs = torch.cat(logprobs, 0)
@@ -329,6 +333,8 @@ class RLOOTrainer(Trainer):
                 sequence_lengths = torch.cat(sequence_lengths, 0)
                 scores = torch.cat(scores, 0)
                 reward_dist_entropy = torch.cat(reward_dist_entropy, 0)
+                rewards_adjusted_all = torch.cat(rewards_adjusted_all, 0)
+                gating_output_all = torch.cat(gating_output_all, 0)
                 del (logprob, ref_logprob, score)
                 torch.cuda.empty_cache()
                 gc.collect()
@@ -352,7 +358,8 @@ class RLOOTrainer(Trainer):
                 # 4. compute rewards
                 kl = logprobs - ref_logprobs
                 non_score_reward = (-args.kl_coef * kl).sum(1)
-                rlhf_reward = scores + non_score_reward
+                entropy_reward = -args.entropy_coef * reward_dist_entropy.squeeze(1)
+                rlhf_reward = scores + non_score_reward + entropy_reward
 
                 # vectorized RLOO advantages implementation
                 rlhf_reward = rlhf_reward.reshape(args.rloo_k, -1)
@@ -428,12 +435,14 @@ class RLOOTrainer(Trainer):
                 mean_kl = kl.sum(1).mean()
                 mean_entropy = (-logprobs).sum(1).mean()
                 mean_non_score_reward = non_score_reward.mean()
+                entropy_reward = entropy_reward.mean()
                 eps = int(self.state.episode / (time.time() - start_time))
                 metrics = {}
                 metrics["eps"] = eps
                 metrics["objective/kl"] = self.accelerator.gather(mean_kl).mean().item()
                 metrics["objective/entropy"] = self.accelerator.gather(mean_entropy).mean().item()
                 metrics["objective/non_score_reward"] = self.accelerator.gather(mean_non_score_reward).mean().item()
+                metrics["objective/entropy_reward"] = self.accelerator.gather(entropy_reward).mean().item()
                 metrics["objective/rlhf_reward"] = self.accelerator.gather(rlhf_reward).mean().item()
                 metrics["objective/scores"] = self.accelerator.gather(scores.mean()).mean().item()
                 metrics["objective/reward_dist_entropy"] = self.accelerator.gather(reward_dist_entropy.mean()).mean().item()
@@ -449,6 +458,11 @@ class RLOOTrainer(Trainer):
                 metrics["val/num_eos_tokens"] = (responses == args.stop_token_id).sum().item()
                 metrics["lr"] = self.lr_scheduler.get_last_lr()[0]
                 metrics["episode"] = self.state.episode
+                gating_output = self.accelerator.gather(gating_output_all).mean(0)
+                rewards_adjusted = self.accelerator.gather(rewards_adjusted_all).mean(0)
+                for i, a in enumerate(self.accelerator.unwrap_model(self.reward_model).attributes):
+                    metrics[f"gating_output/{a}"] = gating_output[i].item()
+                    metrics[f"rewards_adjusted/{a}"] = rewards_adjusted[i].item()
                 self.state.epoch = self.state.episode / self.train_dataset_len  # used by self.log
                 self.state.global_step += 1
                 self.log(metrics)

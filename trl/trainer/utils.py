@@ -1005,7 +1005,7 @@ def get_reward(
         output_hidden_states=True,
         use_cache=False,  # otherwise mistral-based RM would error out
         )
-    return (None, outputs.score[0], None, outputs.single_reward_quantiles, outputs.entropy)
+    return (None, outputs.score[0], None, outputs.single_reward_quantiles, outputs.entropy, outputs.gating_output, outputs.rewards_adjusted)
 
 
 
