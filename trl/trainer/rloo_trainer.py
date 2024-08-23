@@ -345,7 +345,7 @@ class RLOOTrainer(Trainer):
                 sequence_lengths = torch.cat(sequence_lengths, 0)
                 scores = torch.cat(scores, 0)
                 scores_armo = torch.cat(scores_armo, 0)
-                # reward_dist_entropy = torch.cat(reward_dist_entropy, 0)
+                reward_dist_entropy = torch.cat(reward_dist_entropy, 0)
                 rewards_adjusted_all = torch.cat(rewards_adjusted_all, 0)
                 rewards_adjusted_armo_all = torch.cat(rewards_adjusted_armo_all, 0)
                 gating_output_all = torch.cat(gating_output_all, 0)
