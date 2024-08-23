@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 import torch
+import torch.nn.functional as F
 from accelerate import Accelerator
 from accelerate.state import AcceleratorState, PartialState
 from rich.console import Console
@@ -1165,9 +1166,10 @@ def batch_generation(
     local_rollout_forward_batch_size: int,
     pad_token_id: int,
     generation_config: dict,
+    context_length: int,
 ):
     query_responses = []
-    logitss = []
+    logprobs = []
     for i in range(0, queries.shape[0], local_rollout_forward_batch_size):
         query = queries[i : i + local_rollout_forward_batch_size]
         query_response, logits = generate(
@@ -1177,8 +1179,13 @@ def batch_generation(
             generation_config,
         )
         query_responses.append(query_response)
-        logitss.append(logits)
-    return torch.cat(query_responses, 0), torch.cat(logitss, 0)
+        response = query_response[:, context_length:]
+        logits = F.log_softmax(logits, dim=-1)
+        logprob = torch.gather(logits, 2, response.unsqueeze(-1)).squeeze(-1)
+        logprobs.append(logprob)
+        del logits
+        torch.cuda.empty_cache()
+    return torch.cat(query_responses, 0), torch.cat(logprobs, 0)
 
 
 def add_bos_token_if_needed(

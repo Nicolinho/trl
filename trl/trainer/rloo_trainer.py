@@ -273,31 +273,35 @@ class RLOOTrainer(Trainer):
                 gating_output_all = []
                 sequence_lengths = []
                 with unwrap_model_for_generation(model, self.accelerator) as unwrapped_model:
-                    query_responses, logitss = batch_generation(
+                    query_responses, logprobs = batch_generation(
                         unwrapped_model, #TODO unwrapped model is the same as the ref policy if using a single model with lora
                         # model,
                         queries,
                         args.local_rollout_forward_batch_size,
                         tokenizer.pad_token_id,
                         generation_config,
+                        context_length,
                     )
 
                 for i in range(0, queries.shape[0], args.local_rollout_forward_batch_size):
                     query = queries[i : i + args.local_rollout_forward_batch_size]
                     query_response = query_responses[i : i + args.local_rollout_forward_batch_size]
                     response = query_response[:, context_length:]
-                    logits = logitss[i : i + args.local_rollout_forward_batch_size]
-                    all_logprob = F.log_softmax(logits, dim=-1)
-                    logprob = torch.gather(all_logprob, 2, response.unsqueeze(-1)).squeeze(-1)
-                    del logits, all_logprob
+                    # logits = logitss[i : i + args.local_rollout_forward_batch_size]
+                    # all_logprob = F.log_softmax(logits, dim=-1)
+                    # logprob = torch.gather(all_logprob, 2, response.unsqueeze(-1)).squeeze(-1)
+                    # del logits, all_logprob
                     torch.cuda.empty_cache()
 
-                    ref_output = forward(ref_policy, query_response, tokenizer.pad_token_id)
-                    ref_logits = ref_output.logits[:, context_length - 1 : -1]
+                    # ref_output = forward(ref_policy, query_response, tokenizer.pad_token_id)
+                    # ref_logits = ref_output.logits[:, context_length - 1 : -1]
+                    ref_logits = forward(ref_policy, query_response, tokenizer.pad_token_id).logits[:, context_length - 1 : -1]
                     ref_logits /= args.temperature + 1e-7
-                    ref_all_logprob = F.log_softmax(ref_logits, dim=-1)
-                    ref_logprob = torch.gather(ref_all_logprob, 2, response.unsqueeze(-1)).squeeze(-1)
-                    del ref_output, ref_logits, ref_all_logprob
+                    # ref_all_logprob = F.log_softmax(ref_logits, dim=-1)
+                    ref_logits = F.log_softmax(ref_logits, dim=-1)
+                    ref_logprob = torch.gather(ref_logits, 2, response.unsqueeze(-1)).squeeze(-1)
+                    del ref_logits
+                    # del ref_output, ref_logits, ref_all_logprob
                     torch.cuda.empty_cache()
 
                     # Response Processing 1. truncate response after the first occurrence of `stop_token_id`
@@ -321,7 +325,7 @@ class RLOOTrainer(Trainer):
 
                     responses.append(response)
                     postprocessed_responses.append(postprocessed_response)
-                    logprobs.append(logprob)
+                    # logprobs.append(logprob)
                     ref_logprobs.append(ref_logprob)
                     sequence_lengths.append(sequence_length)
                     scores.append(score)
@@ -330,14 +334,15 @@ class RLOOTrainer(Trainer):
                     rewards_adjusted_all.append(rewards_adjusted)
                 responses = torch.cat(responses, 0)
                 postprocessed_responses = torch.cat(postprocessed_responses, 0)
-                logprobs = torch.cat(logprobs, 0)
+                # logprobs = torch.cat(logprobs, 0)
                 ref_logprobs = torch.cat(ref_logprobs, 0)
                 sequence_lengths = torch.cat(sequence_lengths, 0)
                 scores = torch.cat(scores, 0)
                 reward_dist_entropy = torch.cat(reward_dist_entropy, 0)
                 rewards_adjusted_all = torch.cat(rewards_adjusted_all, 0)
                 gating_output_all = torch.cat(gating_output_all, 0)
-                del (logprob, ref_logprob, score)
+                # del (logprob, ref_logprob, score)
+                del (ref_logprob, score)
                 torch.cuda.empty_cache()
                 gc.collect()
 
