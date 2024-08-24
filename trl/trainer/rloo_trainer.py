@@ -362,8 +362,8 @@ class RLOOTrainer(Trainer):
                 # TODO for my armo style reward model, remove bos token as this is how the model was trained
                 contain_eos_token = torch.any(postprocessed_responses == args.stop_token_id, dim=-1)
                 if args.non_eos_penalty:
-                    scores = torch.where(contain_eos_token, scores, args.penalty_reward_value)
-                    scores_armo = torch.where(contain_eos_token, scores_armo, args.penalty_reward_value)
+                    scores_eos = torch.where(contain_eos_token, scores, args.penalty_reward_value)
+                    scores_armo_eos = torch.where(contain_eos_token, scores_armo, args.penalty_reward_value)
                 # accelerator.print(f"{scores=}, {(contain_eos_token.sum() / len(contain_eos_token))=}")
 
                 # be very careful with `padding_mask_p1`; see https://excalidraw.com/#json=LWnzG4w2k5DjF_EOL_xPt,e2w3a-hFJ_gX5vOfeyXGTw
@@ -376,8 +376,8 @@ class RLOOTrainer(Trainer):
                 kl = logprobs - ref_logprobs
                 non_score_reward = (-args.kl_coef * kl).sum(1)
                 entropy_reward = -args.entropy_coef * reward_dist_entropy.squeeze(1)
-                rlhf_reward = scores + non_score_reward
-                # rlhf_reward = scores + non_score_reward + entropy_reward
+                # rlhf_reward = scores_eos + non_score_reward
+                rlhf_reward = scores_eos + non_score_reward + entropy_reward
 
                 # vectorized RLOO advantages implementation
                 rlhf_reward = rlhf_reward.reshape(args.rloo_k, -1)
@@ -463,8 +463,10 @@ class RLOOTrainer(Trainer):
                 metrics["objective/non_score_reward"] = self.accelerator.gather(mean_non_score_reward).mean().item()
                 metrics["objective/entropy_reward"] = self.accelerator.gather(entropy_reward).mean().item()
                 metrics["objective/rlhf_reward"] = self.accelerator.gather(rlhf_reward).mean().item()
-                metrics["objective/scores"] = self.accelerator.gather(scores.mean()).mean().item()
+                metrics["objective/scores_with_eos"] = self.accelerator.gather(scores_eos.mean()).mean().item()
+                metrics["objective/scores_original"] = self.accelerator.gather(scores.mean()).mean().item()
                 metrics["objective/scores_armo"] = self.accelerator.gather(scores_armo.mean()).mean().item()
+                metrics["objective/scores_armo_with_eos"] = self.accelerator.gather(scores_armo_eos.mean()).mean().item()
                 metrics["objective/reward_dist_entropy"] = self.accelerator.gather(reward_dist_entropy.mean()).mean().item()
                 metrics["policy/approxkl_avg"] = self.accelerator.gather(approxkl_stats).mean().item()
                 metrics["policy/clipfrac_avg"] = self.accelerator.gather(pg_clipfrac_stats).mean().item()
@@ -474,8 +476,8 @@ class RLOOTrainer(Trainer):
                 metrics["policy/entropy_avg"] = self.accelerator.gather(entropy_stats).mean().item()
                 metrics["val/ratio"] = self.accelerator.gather(ratio_stats).mean().item()
                 metrics["val/ratio_var"] = self.accelerator.gather(ratio_stats).var().item()
-                # metrics["val/num_eos_tokens"] = (responses == tokenizer.eos_token_id).sum().item()
-                metrics["val/num_eos_tokens"] = (responses == args.stop_token_id).sum().item()
+                metrics["val/contain_eos_token"] = self.accelerator.gather(contain_eos_token).float().mean().item()
+                # metrics["val/num_eos_tokens"] = (responses == args.stop_token_id).sum().item()
                 metrics["lr"] = self.lr_scheduler.get_last_lr()[0]
                 metrics["episode"] = self.state.episode
 
