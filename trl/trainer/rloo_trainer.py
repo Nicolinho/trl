@@ -482,12 +482,13 @@ class RLOOTrainer(Trainer):
                 self.state.epoch = self.state.episode / self.train_dataset_len  # used by self.log
                 self.state.global_step += 1
                 self.log(metrics)
+
+                gating_output = self.accelerator.gather(gating_output_all).mean(0)
+                rewards_adjusted = self.accelerator.gather(rewards_adjusted_all).mean(0)
+                gating_output_armo_all = self.accelerator.gather(gating_output_armo_all).mean(0)
+                rewards_adjusted_armo_all = self.accelerator.gather(rewards_adjusted_armo_all).mean(0)
                 if "wandb" in args.report_to and self.accelerator.process_index == 0 and self.state.global_step > 5:
                     import wandb
-                    gating_output = self.accelerator.gather(gating_output_all).mean(0)
-                    rewards_adjusted = self.accelerator.gather(rewards_adjusted_all).mean(0)
-                    gating_output_armo_all = self.accelerator.gather(gating_output_armo_all).mean(0)
-                    rewards_adjusted_armo_all = self.accelerator.gather(rewards_adjusted_armo_all).mean(0)
                     costum_logs = {}
                     for i, a in enumerate(self.accelerator.unwrap_model(self.reward_model).attributes):
                         metrics[f"gating_output/{a}"] = gating_output[i].item()
