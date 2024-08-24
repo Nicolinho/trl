@@ -218,6 +218,9 @@ class RLOOTrainer(Trainer):
             top_k=0.0,
             top_p=1.0,
             do_sample=True,
+            # eos_token_id=self.tokenizer.eos_token_id,
+            # eos_token_id=args.stop_token_id,
+            pad_token_id=self.tokenizer.pad_token_id,
         )
 
         accelerator.print("===training policy===")
@@ -264,6 +267,7 @@ class RLOOTrainer(Trainer):
                 context_length = queries.shape[1]
                 query_responses = []
                 responses = []
+                response_lens = []
                 postprocessed_responses = []
                 logprobs = []
                 ref_logprobs = []
@@ -310,7 +314,7 @@ class RLOOTrainer(Trainer):
                     # Response Processing 1. truncate response after the first occurrence of `stop_token_id`
                     postprocessed_response = response
                     if args.stop_token_id is not None:  # handle the edge case when stop_token_id exists but is 0
-                        postprocessed_response = truncate_response(
+                        postprocessed_response, response_len = truncate_response(
                             args.stop_token_id, tokenizer.pad_token_id, response
                         )
 
@@ -327,6 +331,7 @@ class RLOOTrainer(Trainer):
                     )
 
                     responses.append(response)
+                    response_lens.append(response_len)
                     postprocessed_responses.append(postprocessed_response)
                     # logprobs.append(logprob)
                     ref_logprobs.append(ref_logprob)
@@ -339,6 +344,7 @@ class RLOOTrainer(Trainer):
                     rewards_adjusted_all.append(rewards_adjusted)
                     rewards_adjusted_armo_all.append(rewards_adjusted_armo)
                 responses = torch.cat(responses, 0)
+                response_lens = torch.cat(response_lens, 0)
                 postprocessed_responses = torch.cat(postprocessed_responses, 0)
                 # logprobs = torch.cat(logprobs, 0)
                 ref_logprobs = torch.cat(ref_logprobs, 0)
@@ -374,6 +380,7 @@ class RLOOTrainer(Trainer):
 
                 # 4. compute rewards
                 kl = logprobs - ref_logprobs
+                non_score_reward = (-args.kl_coef * kl).sum(1)
                 non_score_reward = (-args.kl_coef * kl).sum(1)
                 entropy_reward = -args.entropy_coef * reward_dist_entropy.squeeze(1)
                 # rlhf_reward = scores_eos + non_score_reward
@@ -477,6 +484,7 @@ class RLOOTrainer(Trainer):
                 metrics["val/ratio"] = self.accelerator.gather(ratio_stats).mean().item()
                 metrics["val/ratio_var"] = self.accelerator.gather(ratio_stats).var().item()
                 metrics["val/contain_eos_token"] = self.accelerator.gather(contain_eos_token).float().mean().item()
+                metrics["val/response_len"] = self.accelerator.gather(response_lens).float().mean().item()
                 # metrics["val/num_eos_tokens"] = (responses == args.stop_token_id).sum().item()
                 metrics["lr"] = self.lr_scheduler.get_last_lr()[0]
                 metrics["episode"] = self.state.episode
@@ -493,10 +501,10 @@ class RLOOTrainer(Trainer):
                     import wandb
                     costum_logs = {}
                     for i, a in enumerate(self.accelerator.unwrap_model(self.reward_model).attributes):
-                        metrics[f"gating_output/{a}"] = gating_output[i].item()
-                        metrics[f"rewards_adjusted/{a}"] = rewards_adjusted[i].item()
-                        metrics[f"gating_output_armo/{a}"] = gating_output_armo_all[i].item()
-                        metrics[f"rewards_adjusted_armo/{a}"] = rewards_adjusted_armo_all[i].item()
+                        costum_logs[f"gating_output/{a}"] = gating_output[i].item()
+                        costum_logs[f"rewards_adjusted/{a}"] = rewards_adjusted[i].item()
+                        costum_logs[f"gating_output_armo/{a}"] = gating_output_armo_all[i].item()
+                        costum_logs[f"rewards_adjusted_armo/{a}"] = rewards_adjusted_armo_all[i].item()
 
                     wandb.log({**costum_logs, "train/global_step": self.state.global_step})
 
@@ -549,7 +557,7 @@ class RLOOTrainer(Trainer):
                     response = query_response[:, context_length:]
                     postprocessed_response = response
                     if args.stop_token_id is not None:  # handle the edge case when stop_token_id exists but is 0
-                        postprocessed_response = truncate_response(
+                        postprocessed_response, response_len = truncate_response(
                             args.stop_token_id, tokenizer.pad_token_id, response
                         )
                     table["query"].extend(gather_object(tokenizer.batch_decode(query, skip_special_tokens=True)))

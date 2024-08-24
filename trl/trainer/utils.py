@@ -1118,7 +1118,7 @@ def truncate_response(stop_token_id: int, pad_token_id: int, responses: torch.Te
     new_size = [1] * (len(responses.size()) - 1) + [responses.shape[1]]
     idxs = torch.arange(responses.shape[1], device=responses.device).view(*new_size)
     postprocessed_responses = torch.masked_fill(responses, idxs > trunc_idxs, pad_token_id)
-    return postprocessed_responses
+    return postprocessed_responses, trunc_idxs
 
 
 def generate(
@@ -1179,10 +1179,12 @@ def batch_generation(
             pad_token_id,
             generation_config,
         )
-        query_responses.append(query_response)
         response = query_response[:, context_length:]
+        # if response.shape[1] < generation_config.min_new_tokens:
+        #     response = F.pad(response, (0, generation_config.min_new_tokens - response.shape[1]), 'constant', pad_token_id)
         logits = F.log_softmax(logits, dim=-1)
         logprob = torch.gather(logits, 2, response.unsqueeze(-1)).squeeze(-1)
+        query_responses.append(query_response)
         logprobs.append(logprob)
         del logits
         torch.cuda.empty_cache()
