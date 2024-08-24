@@ -482,7 +482,7 @@ class RLOOTrainer(Trainer):
                 self.state.epoch = self.state.episode / self.train_dataset_len  # used by self.log
                 self.state.global_step += 1
                 self.log(metrics)
-                if "wandb" in args.report_to:
+                if "wandb" in args.report_to and self.accelerator.process_index == 0 and self.state.global_step > 5:
                     import wandb
                     gating_output = self.accelerator.gather(gating_output_all).mean(0)
                     rewards_adjusted = self.accelerator.gather(rewards_adjusted_all).mean(0)
