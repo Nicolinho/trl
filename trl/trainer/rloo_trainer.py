@@ -478,24 +478,27 @@ class RLOOTrainer(Trainer):
                 metrics["val/num_eos_tokens"] = (responses == args.stop_token_id).sum().item()
                 metrics["lr"] = self.lr_scheduler.get_last_lr()[0]
                 metrics["episode"] = self.state.episode
-                # if "wandb" in args.report_to:
-                #     import wandb
-                #     gating_output = self.accelerator.gather(gating_output_all).mean(0)
-                #     rewards_adjusted = self.accelerator.gather(rewards_adjusted_all).mean(0)
-                #     gating_output_armo_all = self.accelerator.gather(gating_output_armo_all).mean(0)
-                #     rewards_adjusted_armo_all = self.accelerator.gather(rewards_adjusted_armo_all).mean(0)
-                #     costum_logs = {}
-                #     for i, a in enumerate(self.accelerator.unwrap_model(self.reward_model).attributes):
-                #         metrics[f"gating_output/{a}"] = gating_output[i].item()
-                #         metrics[f"rewards_adjusted/{a}"] = rewards_adjusted[i].item()
-                #         metrics[f"gating_output_armo/{a}"] = gating_output_armo_all[i].item()
-                #         metrics[f"rewards_adjusted_armo/{a}"] = rewards_adjusted_armo_all[i].item()
-                #
-                #     wandb.log({**costum_logs, "train/global_step": self.state.global_step})
 
                 self.state.epoch = self.state.episode / self.train_dataset_len  # used by self.log
                 self.state.global_step += 1
                 self.log(metrics)
+                if "wandb" in args.report_to:
+                    import wandb
+                    gating_output = self.accelerator.gather(gating_output_all).mean(0)
+                    rewards_adjusted = self.accelerator.gather(rewards_adjusted_all).mean(0)
+                    gating_output_armo_all = self.accelerator.gather(gating_output_armo_all).mean(0)
+                    rewards_adjusted_armo_all = self.accelerator.gather(rewards_adjusted_armo_all).mean(0)
+                    costum_logs = {}
+                    for i, a in enumerate(self.accelerator.unwrap_model(self.reward_model).attributes):
+                        metrics[f"gating_output/{a}"] = gating_output[i].item()
+                        metrics[f"rewards_adjusted/{a}"] = rewards_adjusted[i].item()
+                        metrics[f"gating_output_armo/{a}"] = gating_output_armo_all[i].item()
+                        metrics[f"rewards_adjusted_armo/{a}"] = rewards_adjusted_armo_all[i].item()
+
+                    wandb.log({**costum_logs, "train/global_step": self.state.global_step})
+
+
+
             del kl, mean_kl, mean_entropy, scores
 
             self.lr_scheduler.step()
