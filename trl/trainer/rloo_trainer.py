@@ -219,7 +219,7 @@ class RLOOTrainer(Trainer):
             top_p=1.0,
             do_sample=True,
             # eos_token_id=self.tokenizer.eos_token_id,
-            # eos_token_id=args.stop_token_id,
+            eos_token_id=args.stop_token_id,
             pad_token_id=self.tokenizer.pad_token_id,
         )
 
@@ -429,6 +429,7 @@ class RLOOTrainer(Trainer):
                             pg_loss = pg_loss_max.mean()
                             loss = pg_loss
                             accelerator.backward(loss)
+                            _grad_norm = self.accelerator.clip_grad_norm_(model.parameters(), args.max_grad_norm)
                             optimizer.step()
                             optimizer.zero_grad()
                             with torch.no_grad():
@@ -465,6 +466,8 @@ class RLOOTrainer(Trainer):
                 metrics = {}
                 metrics["eps"] = eps
                 metrics["objective/kl"] = self.accelerator.gather(mean_kl).mean().item()
+                # metrics["loss/grad_norm"] = self.accelerator.gather(_grad_norm.detach().item() if isinstance(_grad_norm, torch.Tensor) else _grad_norm).mean().item()
+                metrics["loss/grad_norm"] = self.accelerator.gather(_grad_norm.detach()).mean().item()
                 metrics["objective/entropy"] = self.accelerator.gather(mean_entropy).mean().item()
                 metrics["objective/non_score_reward"] = self.accelerator.gather(mean_non_score_reward).mean().item()
                 metrics["objective/entropy_reward"] = self.accelerator.gather(entropy_reward).mean().item()
