@@ -1184,6 +1184,9 @@ def batch_generation(
         #     response = F.pad(response, (0, generation_config.min_new_tokens - response.shape[1]), 'constant', pad_token_id)
         logits = F.log_softmax(logits, dim=-1)
         logprob = torch.gather(logits, 2, response.unsqueeze(-1)).squeeze(-1)
+        if response.shape[1] < generation_config.max_new_tokens:
+            query_response = F.pad(query_response, (0, generation_config.max_new_tokens - response.shape[1]), 'constant', pad_token_id)
+            logprob = F.pad(logprob, (0, generation_config.max_new_tokens - response.shape[1]), 'constant', 1.)
         query_responses.append(query_response)
         logprobs.append(logprob)
         del logits

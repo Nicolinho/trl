@@ -23,6 +23,10 @@ class RLOOConfig(OnPolicyConfig):
     cliprange: float = 0.2
     """the clip range"""
 
+    reward_scale: float = 1.
+    reward_bias: float = 0.
+    """scaling and bias of the reward from the reward model"""
+
     # rloo config
     rloo_k: int = 2
     """REINFORCE Leave-One-Out (RLOO) number of online samples per prompt"""
