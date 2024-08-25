@@ -381,10 +381,9 @@ class RLOOTrainer(Trainer):
                 # 4. compute rewards
                 kl = logprobs - ref_logprobs
                 non_score_reward = (-args.kl_coef * kl).sum(1)
-                non_score_reward = (-args.kl_coef * kl).sum(1)
                 entropy_reward = -args.entropy_coef * reward_dist_entropy.squeeze(1)
-                # rlhf_reward = scores_eos + non_score_reward
-                rlhf_reward = scores_eos + non_score_reward + entropy_reward
+                rlhf_reward = scores_eos + non_score_reward
+                # rlhf_reward = scores_eos + non_score_reward + entropy_reward
 
                 # vectorized RLOO advantages implementation
                 rlhf_reward = rlhf_reward.reshape(args.rloo_k, -1)
