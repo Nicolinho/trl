@@ -1007,7 +1007,8 @@ def get_reward(
         use_cache=False,  # otherwise mistral-based RM would error out
         )
     return (outputs.score[0], outputs.single_reward_quantiles, outputs.entropy, outputs.gating_output,
-            outputs.rewards_adjusted, outputs.score_armo[0], outputs.rewards_adjusted_armo, outputs.gating_output_armo)
+            outputs.rewards_adjusted, outputs.score_armo[0], outputs.rewards_adjusted_armo, outputs.gating_output_armo,
+            outputs.score_fsfairx)
 
 
 

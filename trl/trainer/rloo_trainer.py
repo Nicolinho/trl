@@ -261,7 +261,7 @@ class RLOOTrainer(Trainer):
         for update in range(1, args.num_total_batches + 1):
             self.state.episode += 1 * args.batch_size
             data = next(iter_dataloader)
-            with torch.no_grad():
+            with (torch.no_grad()):
                 queries = data["input_ids"].to(device)
                 queries = queries.repeat(args.rloo_k, 1)
                 context_length = queries.shape[1]
@@ -273,6 +273,7 @@ class RLOOTrainer(Trainer):
                 ref_logprobs = []
                 scores = []
                 scores_armo = []
+                scores_fsfairx = []
                 reward_dist_entropy = []
                 rewards_adjusted_all = []
                 rewards_adjusted_armo_all = []
@@ -326,7 +327,8 @@ class RLOOTrainer(Trainer):
                     postprocessed_query_response = torch.where(
                         postprocessed_query_response == tokenizer.bos_token_id, tokenizer.pad_token_id, postprocessed_query_response)
                     sequence_length = first_true_indices(postprocessed_response == tokenizer.pad_token_id) - 1
-                    score, qt_estimates, entropy, gating_output, rewards_adjusted, score_armo, rewards_adjusted_armo, gating_output_armo = get_reward(
+                    (score, qt_estimates, entropy, gating_output, rewards_adjusted, score_armo, rewards_adjusted_armo,
+                    gating_output_armo, score_fsfairx) = get_reward(
                         reward_model, postprocessed_query_response, tokenizer.pad_token_id, context_length
                     )
 
@@ -338,6 +340,7 @@ class RLOOTrainer(Trainer):
                     sequence_lengths.append(sequence_length)
                     scores.append(score)
                     scores_armo.append(score_armo)
+                    scores_fsfairx.append(score_fsfairx)
                     reward_dist_entropy.append(entropy)
                     gating_output_all.append(gating_output)
                     gating_output_armo_all.append(gating_output_armo)
@@ -351,6 +354,7 @@ class RLOOTrainer(Trainer):
                 sequence_lengths = torch.cat(sequence_lengths, 0)
                 scores = torch.cat(scores, 0)
                 scores_armo = torch.cat(scores_armo, 0)
+                scores_fsfairx = torch.cat(scores_fsfairx, 0)
                 reward_dist_entropy = torch.cat(reward_dist_entropy, 0)
                 rewards_adjusted_all = torch.cat(rewards_adjusted_all, 0)
                 rewards_adjusted_armo_all = torch.cat(rewards_adjusted_armo_all, 0)
@@ -477,6 +481,7 @@ class RLOOTrainer(Trainer):
                 metrics["objective/scores_original"] = self.accelerator.gather(scores.mean()).mean().item()
                 metrics["objective/scores_armo"] = self.accelerator.gather(scores_armo.mean()).mean().item()
                 metrics["objective/scores_armo_with_eos"] = self.accelerator.gather(scores_armo_eos.mean()).mean().item()
+                metrics["objective/scores_fsfairx"] = self.accelerator.gather(scores_fsfairx.mean()).mean().item()
                 metrics["objective/reward_dist_entropy"] = self.accelerator.gather(reward_dist_entropy.mean()).mean().item()
                 metrics["policy/approxkl_avg"] = self.accelerator.gather(approxkl_stats).mean().item()
                 metrics["policy/clipfrac_avg"] = self.accelerator.gather(pg_clipfrac_stats).mean().item()
@@ -567,7 +572,8 @@ class RLOOTrainer(Trainer):
                     table["model response"].extend(gather_object(tokenizer.batch_decode(postprocessed_response)))
 
                     postprocessed_query_response = torch.cat((query, postprocessed_response), 1)
-                    score, qt_estimates, entropy, gating_output, rewards_adjusted, score_armo, rewards_adjusted_armo, gating_output_armo = get_reward(
+                    (score, qt_estimates, entropy, gating_output, rewards_adjusted, score_armo, rewards_adjusted_armo,
+                    gating_output_armo, score_fsfairx) = get_reward(
                         self.reward_model, postprocessed_query_response, tokenizer.pad_token_id, context_length
                     )
                     score = args.reward_bias + args.reward_scale * score
