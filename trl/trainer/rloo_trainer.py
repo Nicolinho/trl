@@ -583,6 +583,7 @@ class RLOOTrainer(Trainer):
 
 
                     qt_estimates_list = self.accelerator.gather(qt_estimates).float().cpu().numpy()
+                    qt_estimates_list = args.reward_bias + args.reward_scale * qt_estimates_list
                     entropy_list = self.accelerator.gather(entropy.squeeze(1)).float().cpu().numpy()
                     gating_output = self.accelerator.gather(gating_output).float().cpu().numpy()
                     rewards_adjusted = self.accelerator.gather(rewards_adjusted).float().cpu().numpy()
