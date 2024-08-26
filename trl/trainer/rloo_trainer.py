@@ -570,7 +570,7 @@ class RLOOTrainer(Trainer):
                     score, qt_estimates, entropy, gating_output, rewards_adjusted, score_armo, rewards_adjusted_armo, gating_output_armo = get_reward(
                         self.reward_model, postprocessed_query_response, tokenizer.pad_token_id, context_length
                     )
-                    scores = args.reward_bias + args.reward_scale * scores
+                    score = args.reward_bias + args.reward_scale * score
                     score_list = self.accelerator.gather(score).float().cpu().numpy()
                     table["score"].extend(score_list)
                     # table["score"].extend(self.accelerator.gather(score).float().cpu().numpy())
