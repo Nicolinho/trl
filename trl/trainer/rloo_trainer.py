@@ -163,7 +163,8 @@ class RLOOTrainer(Trainer):
         # sync random states for DataLoader(shuffle=True) before `accelerator.prepare`
         # see https://gist.github.com/vwxyzjn/2581bff1e48e185e0b85b6dfe1def79c
         torch.manual_seed(args.seed)
-        self.model, self.optimizer, self.dataloader = accelerator.prepare(self.model, self.optimizer, self.dataloader)
+        # self.model, self.optimizer, self.dataloader = accelerator.prepare(self.model, self.optimizer, self.dataloader)
+        self.optimizer, self.dataloader = accelerator.prepare(self.optimizer, self.dataloader)
         torch.manual_seed(self.local_seed)  # reset the local seed again
 
         self.eval_dataloader = DataLoader(
@@ -186,7 +187,7 @@ class RLOOTrainer(Trainer):
             self.ref_policy = self.ref_policy.to(self.accelerator.device)
             self.reward_model = self.reward_model.to(self.accelerator.device)
             # For mixed precision
-            self.reward_model = self.accelerator.prepare(self.reward_model)
+            # self.reward_model = self.accelerator.prepare(self.reward_model)
 
     def get_train_dataloader(self) -> DataLoader:
         return self.dataloader
@@ -198,9 +199,11 @@ class RLOOTrainer(Trainer):
         args = self.args
         accelerator = self.accelerator
         optimizer = self.optimizer
-        model = self.model
+        # self.model = self.accelerator.prepare(self.model)
+        model = self.accelerator.prepare(self.model)
         self.model_wrapped = self.model
         ref_policy = self.ref_policy
+        self.reward_model = self.accelerator.prepare(self.reward_model)
         reward_model = self.reward_model
         tokenizer = self.tokenizer
         dataloader = self.dataloader
@@ -523,6 +526,7 @@ class RLOOTrainer(Trainer):
             self.lr_scheduler.step()
             self.control = self.callback_handler.on_step_end(args, self.state, self.control)
             if self.control.should_save:
+                # self._save_checkpoint(model, trial=None, metrics=metrics)
                 self._save_checkpoint(model, trial=None, metrics=metrics)
                 self.control = self.callback_handler.on_save(self.args, self.state, self.control)
             torch.cuda.empty_cache()
