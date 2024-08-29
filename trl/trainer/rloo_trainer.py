@@ -276,6 +276,7 @@ class RLOOTrainer(Trainer):
                 ref_logprobs = []
                 scores = []
                 scores_armo = []
+                scores_risk_aware = []
                 scores_fsfairx = []
                 reward_dist_entropy = []
                 rewards_adjusted_all = []
@@ -334,7 +335,8 @@ class RLOOTrainer(Trainer):
                     gating_output_armo, score_fsfairx) = get_reward(
                         reward_model, postprocessed_query_response, tokenizer.pad_token_id, context_length
                     )
-
+                    score_risk_aware = -torch.exp(-qt_estimates).mean(1)
+                    score_risk_aware = args.reward_bias + args.reward_scale * score_risk_aware
                     responses.append(response)
                     response_lens.append(response_len)
                     postprocessed_responses.append(postprocessed_response)
@@ -342,6 +344,7 @@ class RLOOTrainer(Trainer):
                     ref_logprobs.append(ref_logprob)
                     sequence_lengths.append(sequence_length)
                     scores.append(score)
+                    scores_risk_aware.append(score_risk_aware)
                     scores_armo.append(score_armo)
                     scores_fsfairx.append(score_fsfairx)
                     reward_dist_entropy.append(entropy)
@@ -357,6 +360,7 @@ class RLOOTrainer(Trainer):
                 sequence_lengths = torch.cat(sequence_lengths, 0)
                 scores = torch.cat(scores, 0)
                 scores_armo = torch.cat(scores_armo, 0)
+                scores_risk_aware = torch.cat(scores_risk_aware, 0)
                 scores_fsfairx = torch.cat(scores_fsfairx, 0)
                 reward_dist_entropy = torch.cat(reward_dist_entropy, 0)
                 rewards_adjusted_all = torch.cat(rewards_adjusted_all, 0)
@@ -373,10 +377,12 @@ class RLOOTrainer(Trainer):
                 # only query humans on responses that pass that filter
                 # contain_eos_token = torch.any(postprocessed_responses == tokenizer.eos_token_id, dim=-1)
                 # TODO for my armo style reward model, remove bos token as this is how the model was trained
+                scores_orig05 = 0 + 5 * scores
                 scores = args.reward_bias + args.reward_scale * scores
                 contain_eos_token = torch.any(postprocessed_responses == args.stop_token_id, dim=-1)
                 if args.non_eos_penalty:
                     scores_eos = torch.where(contain_eos_token, scores, args.penalty_reward_value)
+                    scores_risk_aware_eos = torch.where(contain_eos_token, scores_risk_aware, args.penalty_reward_value)
                     scores_armo_eos = torch.where(contain_eos_token, scores_armo, args.penalty_reward_value)
                 # accelerator.print(f"{scores=}, {(contain_eos_token.sum() / len(contain_eos_token))=}")
 
@@ -391,7 +397,8 @@ class RLOOTrainer(Trainer):
                 non_score_reward = (-args.kl_coef * kl).sum(1)
                 entropy_reward = -args.entropy_coef * reward_dist_entropy.squeeze(1)
                 # rlhf_reward = scores_eos + non_score_reward
-                rlhf_reward = scores_eos + non_score_reward + entropy_reward
+                rlhf_reward = scores_risk_aware_eos + non_score_reward
+                # rlhf_reward = scores_eos + non_score_reward + entropy_reward
 
                 # vectorized RLOO advantages implementation
                 rlhf_reward = rlhf_reward.reshape(args.rloo_k, -1)
@@ -482,6 +489,8 @@ class RLOOTrainer(Trainer):
                 metrics["objective/rlhf_reward"] = self.accelerator.gather(rlhf_reward).mean().item()
                 metrics["objective/scores_with_eos"] = self.accelerator.gather(scores_eos.mean()).mean().item()
                 metrics["objective/scores_original"] = self.accelerator.gather(scores.mean()).mean().item()
+                metrics["objective/scores_orig05"] = self.accelerator.gather(scores_orig05.mean()).mean().item()
+                metrics["objective/scores_risk_aware"] = self.accelerator.gather(scores_risk_aware.mean()).mean().item()
                 metrics["objective/scores_armo"] = self.accelerator.gather(scores_armo.mean()).mean().item()
                 metrics["objective/scores_armo_with_eos"] = self.accelerator.gather(scores_armo_eos.mean()).mean().item()
                 metrics["objective/scores_fsfairx"] = self.accelerator.gather(scores_fsfairx.mean()).mean().item()
@@ -586,8 +595,12 @@ class RLOOTrainer(Trainer):
                     # table["score"].extend(self.accelerator.gather(score).float().cpu().numpy())
 
 
+                    score_risk_aware = -torch.exp(-qt_estimates).mean(1)
+                    score_risk_aware = args.reward_bias + args.reward_scale * score_risk_aware
                     qt_estimates_list = self.accelerator.gather(qt_estimates).float().cpu().numpy()
-                    qt_estimates_list = args.reward_bias + args.reward_scale * qt_estimates_list
+                    score_risk_aware_list = self.accelerator.gather(score_risk_aware).float().cpu().numpy()
+                    table["score"].extend(score_risk_aware_list)
+
                     entropy_list = self.accelerator.gather(entropy.squeeze(1)).float().cpu().numpy()
                     gating_output = self.accelerator.gather(gating_output).float().cpu().numpy()
                     rewards_adjusted = self.accelerator.gather(rewards_adjusted).float().cpu().numpy()
@@ -606,9 +619,9 @@ class RLOOTrainer(Trainer):
                                 table["reward_distribution"].extend([wandb.Image(plot_obj)])
                                 plt.close()
                             for gat, rew in zip(gating_output, rewards_adjusted):
-                                plt.bar(range(len(gat)), gat)
-                                table["gating_output"].extend([wandb.Image(plt)])
-                                plt.close()
+                                # plt.bar(range(len(gat)), gat)
+                                # table["gating_output"].extend([wandb.Image(plt)])
+                                # plt.close()
                                 plt.bar(range(len(rew)), rew)
                                 table["rewards_adjusted"].extend([wandb.Image(plt)])
                                 plt.close()
