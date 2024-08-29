@@ -335,7 +335,7 @@ class RLOOTrainer(Trainer):
                     gating_output_armo, score_fsfairx) = get_reward(
                         reward_model, postprocessed_query_response, tokenizer.pad_token_id, context_length
                     )
-                    score_risk_aware = -torch.exp(-qt_estimates).mean(1)
+                    score_risk_aware = -torch.exp(-(5*qt_estimates)).mean(1)
                     score_risk_aware = args.reward_bias + args.reward_scale * score_risk_aware
                     responses.append(response)
                     response_lens.append(response_len)
@@ -595,11 +595,11 @@ class RLOOTrainer(Trainer):
                     # table["score"].extend(self.accelerator.gather(score).float().cpu().numpy())
 
 
-                    score_risk_aware = -torch.exp(-qt_estimates).mean(1)
+                    score_risk_aware = -torch.exp(-(5*-qt_estimates)).mean(1)
                     score_risk_aware = args.reward_bias + args.reward_scale * score_risk_aware
                     qt_estimates_list = self.accelerator.gather(qt_estimates).float().cpu().numpy()
                     score_risk_aware_list = self.accelerator.gather(score_risk_aware).float().cpu().numpy()
-                    table["score"].extend(score_risk_aware_list)
+                    table["score_risk_aware_list"].extend(score_risk_aware_list)
 
                     entropy_list = self.accelerator.gather(entropy.squeeze(1)).float().cpu().numpy()
                     gating_output = self.accelerator.gather(gating_output).float().cpu().numpy()
