@@ -23,6 +23,9 @@ class RLOOConfig(OnPolicyConfig):
     cliprange: float = 0.2
     """the clip range"""
 
+    risk_aware_coeff_start: float = 5.
+    risk_aware_coeff_end: float = 5.
+
     reward_scale: float = 1.
     reward_bias: float = 0.
     """scaling and bias of the reward from the reward model"""

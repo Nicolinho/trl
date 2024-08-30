@@ -47,6 +47,26 @@ from .rloo_config import RLOOConfig
 INVALID_LOGPROB = 1.0
 
 
+def linear_decay(initial_val, final_val, total_steps, current_step):
+    """
+    Calculate the intermediate value at a specific step using linear decay,
+    from an initial value to a final value.
+
+    Parameters:
+    - initial_val (float): The initial value.
+    - final_val (float): The final value after decay.
+    - total_steps (int): The total number of steps over which to decay the value.
+    - current_step (int): The current step (iteration).
+
+    Returns:
+    - float: The adjusted value.
+    """
+    if current_step >= total_steps:
+        return final_val  # Once past total_steps, the lr should stay at final_lr
+    decay_rate = (initial_val - final_val) / total_steps
+    return initial_val - decay_rate * current_step
+
+
 class RLOOTrainer(Trainer):
     def __init__(
         self,
@@ -335,8 +355,12 @@ class RLOOTrainer(Trainer):
                     gating_output_armo, score_fsfairx) = get_reward(
                         reward_model, postprocessed_query_response, tokenizer.pad_token_id, context_length
                     )
-                    score_risk_aware = -torch.exp(-(5*qt_estimates)).mean(1)
+
+                    risk_aware_coeff = linear_decay(args.risk_aware_coeff_start, args.risk_aware_coeff_end,
+                                                    total_steps=200, current_step=self.state.global_step)
+                    score_risk_aware = -torch.exp(-(risk_aware_coeff * qt_estimates)).mean(1)
                     score_risk_aware = args.reward_bias + args.reward_scale * score_risk_aware
+
                     responses.append(response)
                     response_lens.append(response_len)
                     postprocessed_responses.append(postprocessed_response)
@@ -507,6 +531,7 @@ class RLOOTrainer(Trainer):
                 metrics["val/response_len"] = self.accelerator.gather(response_lens).float().mean().item()
                 # metrics["val/num_eos_tokens"] = (responses == args.stop_token_id).sum().item()
                 metrics["lr"] = self.lr_scheduler.get_last_lr()[0]
+                metrics["risk_aware_coeff"] = risk_aware_coeff
                 metrics["episode"] = self.state.episode
 
                 self.state.epoch = self.state.episode / self.train_dataset_len  # used by self.log
@@ -594,12 +619,13 @@ class RLOOTrainer(Trainer):
                     table["score"].extend(score_list)
                     # table["score"].extend(self.accelerator.gather(score).float().cpu().numpy())
 
-
-                    score_risk_aware = -torch.exp(-(5*-qt_estimates)).mean(1)
+                    risk_aware_coeff = linear_decay(args.risk_aware_coeff_start, args.risk_aware_coeff_end,
+                                                    total_steps=200, current_step=self.state.global_step)
+                    score_risk_aware = -torch.exp(-(risk_aware_coeff * qt_estimates)).mean(1)
                     score_risk_aware = args.reward_bias + args.reward_scale * score_risk_aware
                     qt_estimates_list = self.accelerator.gather(qt_estimates).float().cpu().numpy()
                     score_risk_aware_list = self.accelerator.gather(score_risk_aware).float().cpu().numpy()
-                    table["score_risk_aware_list"].extend(score_risk_aware_list)
+                    table["score_risk_aware"].extend(score_risk_aware_list)
 
                     entropy_list = self.accelerator.gather(entropy.squeeze(1)).float().cpu().numpy()
                     gating_output = self.accelerator.gather(gating_output).float().cpu().numpy()
