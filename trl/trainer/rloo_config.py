@@ -19,12 +19,14 @@ class RLOOConfig(OnPolicyConfig):
     kl_coef: float = 0.05
     """the KL coefficient"""
     entropy_coef: float = 0.
+    entropy_loss: int = 0   # whether to use the entropy loss or not ( set 1 or 0)
     """the KL coefficient"""
     cliprange: float = 0.2
     """the clip range"""
 
     risk_aware_coeff_start: float = 5.
     risk_aware_coeff_end: float = 5.
+    risk_aware_loss: int = 0 # whether to use the risk aware loss or not ( set 1 or 0)
 
     reward_scale: float = 1.
     reward_bias: float = 0.

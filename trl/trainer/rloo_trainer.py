@@ -425,7 +425,11 @@ class RLOOTrainer(Trainer):
                 entropy_reward = -args.entropy_coef * reward_dist_entropy.squeeze(1)
                 # rlhf_reward = scores_eos + non_score_reward
                 # rlhf_reward = scores_risk_aware_eos + non_score_reward
-                rlhf_reward = scores_eos + non_score_reward + entropy_reward
+                # rlhf_reward = scores_eos + non_score_reward + entropy_reward
+                rlhf_reward = (1-args.risk_aware_loss) * scores_eos + \
+                              args.risk_aware_loss * scores_risk_aware_eos + \
+                              args.entropy_loss * entropy_reward + \
+                              non_score_reward
 
                 # vectorized RLOO advantages implementation
                 rlhf_reward = rlhf_reward.reshape(args.rloo_k, -1)
@@ -620,7 +624,8 @@ class RLOOTrainer(Trainer):
                     gating_output_armo, score_fsfairx) = get_reward(
                         self.reward_model, postprocessed_query_response, tokenizer.pad_token_id, context_length
                     )
-                    score = args.reward_bias + args.reward_scale * score
+                    # score = args.reward_bias + args.reward_scale * score
+
                     score_list = self.accelerator.gather(score).float().cpu().numpy()
                     table["score"].extend(score_list)
                     # table["score"].extend(self.accelerator.gather(score).float().cpu().numpy())
@@ -683,7 +688,8 @@ def plot_quantile_histogram(quantiles, values, prediction):
     plt.hist(sample_values, bins=30, density=True, alpha=0.6, color='b', edgecolor='black')
 
     # Plot the interpolated PDF as a line plot for reference
-    plt.plot(sample_values, np.zeros_like(sample_values), 'o', label='Interpolated Data Points', markersize=2)
+    plt.plot(sample_values, np.zeros_like(sample_values), 'o', markersize=2)
+    # plt.plot(sample_values, np.zeros_like(sample_values), 'o', label='Interpolated Data Points', markersize=2)
     plt.axvline(prediction, color='r', linestyle='--', linewidth=2, label='Expectation (point estimate)')
 
     plt.title('Histogram Approximating the PDF from Quantiles')
