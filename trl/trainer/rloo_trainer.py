@@ -298,6 +298,7 @@ class RLOOTrainer(Trainer):
                 scores_armo = []
                 scores_risk_aware = []
                 scores_fsfairx = []
+                qt_estimates_all = []
                 reward_dist_entropy = []
                 rewards_adjusted_all = []
                 rewards_adjusted_armo_all = []
@@ -361,6 +362,7 @@ class RLOOTrainer(Trainer):
                     score_risk_aware = -torch.exp(-(risk_aware_coeff * qt_estimates)).mean(1)
                     score_risk_aware = args.reward_bias + args.reward_scale * score_risk_aware
 
+                    qt_estimates_all.append(qt_estimates)
                     responses.append(response)
                     response_lens.append(response_len)
                     postprocessed_responses.append(postprocessed_response)
@@ -377,6 +379,7 @@ class RLOOTrainer(Trainer):
                     rewards_adjusted_all.append(rewards_adjusted)
                     rewards_adjusted_armo_all.append(rewards_adjusted_armo)
                 responses = torch.cat(responses, 0)
+                qt_estimates_all = torch.cat(qt_estimates_all, 0)
                 response_lens = torch.cat(response_lens, 0)
                 postprocessed_responses = torch.cat(postprocessed_responses, 0)
                 # logprobs = torch.cat(logprobs, 0)
@@ -542,6 +545,7 @@ class RLOOTrainer(Trainer):
                 rewards_adjusted = self.accelerator.gather(rewards_adjusted_all).mean(0)
                 gating_output_armo_all = self.accelerator.gather(gating_output_armo_all).mean(0)
                 rewards_adjusted_armo_all = self.accelerator.gather(rewards_adjusted_armo_all).mean(0)
+                qt_estimates = self.accelerator.gather(qt_estimates_all).mean(0)
                 if "wandb" in args.report_to and self.accelerator.process_index == 0 and self.state.global_step > 5:
                     import wandb
                     costum_logs = {}
@@ -550,6 +554,8 @@ class RLOOTrainer(Trainer):
                         costum_logs[f"rewards_adjusted/{a}"] = rewards_adjusted[i].item()
                         costum_logs[f"gating_output_armo/{a}"] = gating_output_armo_all[i].item()
                         costum_logs[f"rewards_adjusted_armo/{a}"] = rewards_adjusted_armo_all[i].item()
+                    for i in range(qt_estimates.shape[0]):
+                        costum_logs[f"quantile_estimates/{i:02d}"] = qt_estimates[i].item()
 
                     wandb.log({**costum_logs, "train/global_step": self.state.global_step})
 
